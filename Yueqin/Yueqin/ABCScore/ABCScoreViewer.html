@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>ABC score</title>
+    <style>
+        :root { color-scheme: light; color: #202124; background: #ffffff; }
+        :root[data-theme="dark"] { color-scheme: dark; color: #eeeeef; background: #1c1c1e; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+        body { font-family: system-ui, sans-serif; }
+        #viewport { width: 100%; height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 16px; }
+        #score { display: flow-root; }
+        .tune { margin-bottom: 24px; }
+        .tune:last-child { margin-bottom: 0; }
+        .tune svg { color: inherit; }
+        #viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+    </style>
+    <script src="abcjs-basic-min.js" defer></script>
+    <script src="ABCScoreRenderer.js" defer></script>
+</head>
+<body>
+    <main id="viewport" tabindex="0" aria-label="Scrollable music notation">
+        <div id="score"></div>
+    </main>
+</body>
+</html>

@@ -30,6 +30,23 @@ Play/pause and seek use native audio playback. **Export FLAC…** copies the ori
 
 GUI verification is bounded functional smoke with real checkpoints: all seven workflows, both replay stages, a short recording, resume, partial batches, cancellation/recovery, readiness/error presentation and playback were exercised in a temporary native SwiftUI host. Native numerical fidelity, listening quality and performance acceptance remain deferred. System-hosted save-dialog acceptance was not completed by session automation; request serialization and FLAC creation/replacement/failure preservation were exercised separately.
 
+### Standalone ABC score component
+
+[`ABCScoreView`](../Yueqin/Yueqin/ABCScore/ABCScoreView.swift) is a reusable, read-only SwiftUI view. It is intentionally **not connected to any workflow form, result inspector or navigation destination yet**. Its only input is notation text:
+
+```swift
+ABCScoreView(abc: scoreText)
+    .frame(minHeight: 360)
+```
+
+The host owns file loading, editing, generation and placement. The component has no `LyraCore`, workspace or model dependency. It supplies native zoom controls (50–300%), fit-width reset, light/dark appearance, scrolling, empty/error presentation and a collapsible plain-text parser-warning panel. Multiple tunes and renderable portions of malformed input remain viewable. Parser warnings are not validation of musical correctness or generation fidelity.
+
+Engraving preserves the source's staff-system breaks at abcjs's natural layout width; responsive SVG scaling fits the available space without re-parsing on resize, theme or zoom changes. Automatic line wrapping is deliberately disabled: it can misalign multi-voice scores containing multi-measure rests. Zoom enlarges the scrollable notation rather than changing the score's line breaks.
+
+The private `WKWebView` loads only bundled resources, uses a nonpersistent data store, blocks external navigation and network connections, and passes ABC as structured JavaScript arguments rather than interpolated HTML or executable code. Keep both Swift files in [`ABCScore/`](../Yueqin/Yueqin/ABCScore/) in the same target and package its four web/license resources in that target's bundle. Yueqin's existing filesystem-synchronized Xcode group includes them automatically. There is no notation editor, audio playback or online renderer in this component.
+
+The unmodified bundled renderer is [abcjs 6.7.0](https://github.com/paulrosen/abcjs/tree/v6.7.0), distributed under its adjacent [MIT license](../Yueqin/Yueqin/ABCScore/abcjs-basic-min.js.LICENSE). `abcjs-basic-min.js` comes from the upstream tag's `dist/` directory; its SHA-256 is `b0cde4bc52bb33949181683a245005fff8a024a8c1f07ec6ce3222cd4bd72e51`.
+
 ## CLI generation
 
 A request is JSON. The smallest useful form is:
@@ -229,6 +246,18 @@ lyra plan request.json \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/plan
 ```
+
+The CLI and **Plan score** GUI workflow produce the same five-file plan:
+
+| File | Meaning |
+| --- | --- |
+| `score.abc` | Human-readable ABC notation: voices, notes/rests, rhythm, key/meter and other score directives. This is the file to preview or copy for editing. |
+| `abc_tokens.npy` | The exact integer token IDs representing the planned score, stored as a NumPy-format array. Rendering reuses these IDs rather than re-tokenizing the text. |
+| `prefix.npy` | The complete saved conditioning-token prefix for subsequent generation, also a NumPy-format array. It is not another score or an audio waveform. |
+| `plan.json` | Structured plan data: request, ABC text and IDs, timing, truncation flags and effective generation configuration. |
+| `plan_manifest.json` | SHA-256 integrity records for the other four files. Keep all five together for **Render plan** / `render-plan`. |
+
+Planning alone does not create audio, semantic tokens or acoustic latents. When resource recording is enabled, sibling files such as `outputs/plan.resources.json` and `outputs/plan.resources.jsonl` contain the diagnostic resource summary and individual samples. They are not score content or required plan inputs.
 
 Render the exact saved plan later. The saved generation configuration and original ABC IDs/prefix are restored directly; ABC is not decoded and re-tokenized:
 

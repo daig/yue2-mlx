@@ -118,6 +118,8 @@ open Yueqin/Yueqin.xcodeproj
 
 Start with **Prepare models**, or expand **Engine settings** and select existing converted-model and VAE directories. Use **Diagnostics** to check readiness. **Generate song** accepts composed inputs or an existing request JSON file; **Plan score**, **Render plan**, **Replay artifacts** and **Batch** expose the corresponding native workflows. See the [GUI workflow guide](docs/usage.md#yueqin-macos-app).
 
+A self-contained [ABC notation viewer component](docs/usage.md#standalone-abc-score-component) is available for future placement. It renders offline with native zoom and parser-warning controls; it is not yet wired into the app's workflow UI.
+
 This is a local-development app, not a self-contained notarized distribution. It still links Homebrew libsndfile. App Sandbox is disabled for native filesystem/cache access and shared GPU ownership; Hardened Runtime remains enabled with library validation disabled for that external dependency.
 
 ## Shared native core and Swift package
@@ -173,5 +175,6 @@ Do not co-install its vendored top-level `yue2` module with upstream `yue2-infer
 - Project code: [Apache-2.0](LICENSE). Vendored upstream code retains its [Apache license](vendor/yue/LICENSE).
 - **Model weights: [CC BY-NC 4.0](vendor/yue/MODEL_LICENSE)**, including the generator and default decoder. The code license does not grant unrestricted commercial model use.
 - VAE-derived code retains the [upstream third-party notices](vendor/yue/THIRD_PARTY_NOTICES.md) and [MIT license texts](vendor/yue/licenses/). Native AR retains [Apple's MIT license](native/licenses/MLX_LM_MIT.txt); the [native NAR kernel](native/src/nar_attention.cpp) includes the MIT notice for its adapted MLX lane layout. Native CPU noise retains the [PyTorch and MT19937 BSD notices](native/licenses/PYTORCH-BSD.txt).
+- The standalone ABC viewer bundles [abcjs 6.7.0](https://github.com/paulrosen/abcjs/tree/v6.7.0) under its [MIT license](Yueqin/Yueqin/ABCScore/abcjs-basic-min.js.LICENSE).
 
 No model weights are bundled or re-hosted by this release.
