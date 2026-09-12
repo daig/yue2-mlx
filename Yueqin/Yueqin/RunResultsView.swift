@@ -82,6 +82,7 @@ import UniformTypeIdentifiers
   let controller: RunController
   let onUseOutput: (WorkflowKind, URL) -> Void
   @State private var player = RecordingPlayer()
+  @State private var advancedOutputExpanded = false
 
   init(controller: RunController, onUseOutput: @escaping (WorkflowKind, URL) -> Void) {
     self.controller = controller
@@ -113,26 +114,14 @@ import UniformTypeIdentifiers
               }.padding(.top, 6)
             }
           }
-          if let data = controller.resultData {
-            jsonDisclosure("Exact result JSON", data: data, identifier: "result.json")
-          }
-          if let data = controller.partialBatchData {
-            Text(
-              "Batch receipt at the destination. It may include earlier attempts; this operation did not return a completed batch result."
-            ).foregroundStyle(.secondary)
-            jsonDisclosure(
-              "Saved batch receipt JSON", data: data, identifier: "result.partial_batch")
-          }
-          if let submission = controller.lastSubmission {
-            jsonDisclosure(
-              "Exact submitted options", data: submission.options, identifier: "result.options")
-          }
+          advancedOutput
         }
       }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(minWidth: 320, idealWidth: 360)
     .accessibilityIdentifier("result.inspector")
     .onChange(of: controller.isRunning) { _, running in if running { player.stop() } }
+    .onChange(of: controller.startedAt) { _, _ in advancedOutputExpanded = false }
     .onChange(of: controller.outputURL) { _, _ in player.stop() }
     .onDisappear { player.stop() }
   }
@@ -174,9 +163,6 @@ import UniformTypeIdentifiers
 
   @ViewBuilder private var resultDetails: some View {
     let result = controller.result
-    if let output = controller.outputURL, controller.succeeded || !controller.artifacts.isEmpty {
-      pathDetail("Output destination", output.path)
-    }
     if result["truncated"].flag == true
       || result["truncated"].fields.values.contains(where: { $0.flag == true })
     {
@@ -211,8 +197,12 @@ import UniformTypeIdentifiers
         }
       }
     }
-    if let model = controller.preparedModelPath { pathDetail("Prepared generator", model) }
-    if let vae = controller.preparedVAEPath { pathDetail("VAE", vae) }
+    if controller.preparedModelPath != nil {
+      Label("Generator prepared", systemImage: "checkmark.circle")
+    }
+    if controller.preparedVAEPath != nil {
+      Label("VAE available", systemImage: "checkmark.circle")
+    }
     if controller.lastSubmission?.kind == .batch, !result["results"].rows.isEmpty {
       Text(
         "Batch: \(result["results"].rows.count) recorded of \(result["expected"].summary); \(result["failed"].summary) failed"
@@ -252,35 +242,69 @@ import UniformTypeIdentifiers
     if let error = controller.artifactError {
       Text("Some artifacts could not be listed: \(error)").foregroundStyle(.orange)
     }
-    if !controller.artifacts.isEmpty {
+    let recordings = controller.artifacts.filter { $0.pathExtension.lowercased() == "flac" }
+    if !recordings.isEmpty {
       Divider()
-      Text(controller.succeeded ? "Saved artifacts" : "Files at the destination").font(.headline)
-      ForEach(controller.artifacts.filter { $0.pathExtension.lowercased() == "flac" }, id: \.self) {
-        audio in
+      Text(controller.succeeded ? "Recordings" : "Available recordings").font(.headline)
+      ForEach(Array(recordings.enumerated()), id: \.element) { index, audio in
+        Text(recordings.count == 1 ? "Recording" : "Recording \(index + 1)").font(.subheadline)
         audioControls(audio)
       }
       if let error = player.error {
         Text(error).foregroundStyle(.red).textSelection(.enabled).accessibilityIdentifier(
           "playback.error")
       }
-      DisclosureGroup("Files (\(controller.artifacts.count))") {
-        LazyVStack(alignment: .leading, spacing: 8) {
-          ForEach(controller.artifacts, id: \.self) { file in
-            Button {
-              NSWorkspace.shared.activateFileViewerSelecting([file])
-            } label: {
-              Label(relativePath(file), systemImage: "doc")
-                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-            }.buttonStyle(.link).help(file.path).accessibilityIdentifier(
-              "result.artifact.\(file.lastPathComponent)")
-          }
-        }.padding(.top, 6)
-      }
     }
+  }
+
+  private var advancedOutput: some View {
+    DisclosureGroup("Advanced output", isExpanded: $advancedOutputExpanded) {
+      VStack(alignment: .leading, spacing: 14) {
+        if !controller.isRunning {
+          if let output = controller.outputURL,
+            controller.succeeded || !controller.artifacts.isEmpty
+          {
+            pathDetail("Output destination", output.path)
+          }
+          if let model = controller.preparedModelPath { pathDetail("Prepared generator", model) }
+          if let vae = controller.preparedVAEPath { pathDetail("VAE", vae) }
+          if !controller.artifacts.isEmpty {
+            Text(controller.succeeded ? "Saved artifacts" : "Files at the destination")
+              .font(.headline)
+            DisclosureGroup("Files (\(controller.artifacts.count))") {
+              LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(controller.artifacts, id: \.self) { file in
+                  Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([file])
+                  } label: {
+                    Label(relativePath(file), systemImage: "doc")
+                      .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                  }.buttonStyle(.link).help(file.path).accessibilityIdentifier(
+                    "result.artifact.\(file.lastPathComponent)")
+                }
+              }.padding(.top, 6)
+            }
+          }
+        }
+        if let data = controller.resultData {
+          jsonDisclosure("Exact result JSON", data: data, identifier: "result.json")
+        }
+        if let data = controller.partialBatchData {
+          Text(
+            "Batch receipt at the destination. It may include earlier attempts; this operation did not return a completed batch result."
+          ).foregroundStyle(.secondary)
+          jsonDisclosure(
+            "Saved batch receipt JSON", data: data, identifier: "result.partial_batch")
+        }
+        if let submission = controller.lastSubmission {
+          jsonDisclosure(
+            "Exact submitted options", data: submission.options, identifier: "result.options")
+        }
+      }.padding(.top, 6)
+    }.accessibilityIdentifier("result.advanced_output")
   }
   private func audioControls(_ audio: URL) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(relativePath(audio)).font(.subheadline).textSelection(.enabled)
       TimelineView(.periodic(from: .now, by: 0.25)) { _ in
         HStack {
           Button {

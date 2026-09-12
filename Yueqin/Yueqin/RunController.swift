@@ -95,6 +95,19 @@ struct RunEvent: Identifiable, Sendable {
   let value: RunJSON
 }
 
+struct PlannedScore: Sendable {
+  let abc: String
+  let outputURL: URL
+  let truncated: Bool
+}
+
+enum PlannedScoreStatus: Equatable, Sendable {
+  case empty
+  case running
+  case ready
+  case failed(String)
+}
+
 @MainActor @Observable final class RunController {
   private(set) var isRunning = false
   private(set) var statusTitle = "Ready"
@@ -115,6 +128,8 @@ struct RunEvent: Identifiable, Sendable {
   private(set) var artifacts: [URL] = []
   private(set) var outputURL: URL?
   private(set) var artifactError: String?
+  private(set) var plannedScore: PlannedScore?
+  private(set) var planScoreStatus: PlannedScoreStatus = .empty
   var onIdle: (() -> Void)?
   @ObservationIgnored private let queue = DispatchQueue(
     label: "Yueqin.native-workflow", qos: .userInitiated)
@@ -147,6 +162,7 @@ struct RunEvent: Identifiable, Sendable {
     succeeded = false
     artifacts = []
     outputURL = nil
+    if submission.kind == .plan { planScoreStatus = .running }
     queue.async { [self] in
       var outcome: WorkflowResult?
       var failure: String?
@@ -169,6 +185,44 @@ struct RunEvent: Identifiable, Sendable {
       let parsed =
         outcome.flatMap { try? JSONDecoder().decode(RunJSON.self, from: $0.json) } ?? .null
       let output = parsed["output"].text.map { URL(fileURLWithPath: $0) } ?? submission.outputURL
+      var score: PlannedScore?
+      var scoreFailure: String?
+      if submission.kind == .plan {
+        if outcome?.succeeded == true, let output {
+          let scoreURL = output.appendingPathComponent("score.abc")
+          do {
+            let abc: String
+            do {
+              let data = try Data(contentsOf: scoreURL)
+              guard let text = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadInapplicableStringEncoding)
+              }
+              abc = text
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+              let metadata = try JSONDecoder().decode(
+                RunJSON.self,
+                from: Data(contentsOf: output.appendingPathComponent("plan.json")))
+              guard metadata["request"]["cot"].text == "off",
+                case .some(.null) = metadata.fields["abc"]
+              else { throw error }
+              abc = ""
+            }
+            score = PlannedScore(
+              abc: abc, outputURL: output, truncated: parsed["truncated"].flag == true)
+          } catch {
+            scoreFailure =
+              "The plan completed, but its saved score could not be loaded at \(scoreURL.path): \(error.localizedDescription)"
+          }
+        } else {
+          scoreFailure =
+            cancelled
+            ? "Planning was cancelled."
+            : failure
+              ?? (outcome?.succeeded == true
+                ? "The plan completed, but no output location was returned."
+                : "Planning failed.")
+        }
+      }
       var files: [URL] = []
       var listingError: String?
       var partial: Data?
@@ -204,6 +258,8 @@ struct RunEvent: Identifiable, Sendable {
       let finalFiles = files.sorted { $0.path < $1.path }
       let finalListingError = listingError
       let finalPartial = partial
+      let finalScore = score
+      let finalScoreFailure = scoreFailure
       DispatchQueue.main.async { [self] in
         guard activeID == id else { return }
         resultData = finalOutcome?.json
@@ -223,6 +279,14 @@ struct RunEvent: Identifiable, Sendable {
         artifacts = finalFiles
         artifactError = finalListingError
         outputURL = output
+        if submission.kind == .plan {
+          if let finalScore {
+            plannedScore = finalScore
+            planScoreStatus = .ready
+          } else {
+            planScoreStatus = .failed(finalScoreFailure ?? "The saved score could not be loaded.")
+          }
+        }
         if succeeded && submission.kind == .prepare {
           preparedModelPath = parsed["model"].text
           preparedVAEPath = parsed["vae"].text

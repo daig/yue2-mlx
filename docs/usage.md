@@ -4,7 +4,7 @@ Run shell commands from the repository root after completing the [native install
 
 ## Yueqin macOS app
 
-Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as described in the [app setup](../README.md#yueqin-macos-app). The sidebar presents every native workflow; the right-hand **Activity & Results** inspector stays visible while navigating. Run the selected workflow with the labeled toolbar button or **Command-Return**. Execution is serial and off the UI thread. Cancel from the toolbar, inspector or **Command-Period**; quitting during execution offers to cancel and waits for the native worker to stop.
+Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as described in the [app setup](../README.md#yueqin-macos-app). The sidebar presents every native workflow. **Activity & Results** stays available while navigating: below the request controls in **Plan score**, and in the right-hand inspector elsewhere. Run the selected workflow with the labeled toolbar button or **Command-Return**. Execution is serial and off the UI thread. Cancel from the toolbar, activity panel or **Command-Period**; quitting during execution offers to cancel and waits for the native worker to stop.
 
 ### Models and output
 
@@ -26,13 +26,23 @@ JSON-file mode passes the file path to the core without importing or rewriting i
 
 The inspector shows native stages/counts, elapsed time, warnings, typed errors, truncation flags and batch-row outcomes. A token-limited run can complete without reaching the sequence's natural end. Files at a failed run's destination are not presented as proof of newly completed output.
 
-Play/pause and seek use native audio playback. **Export FLAC…** copies the original recording without re-encoding, staging beside the destination before an atomic replacement. Finder actions reveal artifacts; disclosures retain the exact submitted options and result JSON. Neither frontend adds memory caps or allocation guards.
+Play/pause and seek use native audio playback. **Export FLAC…** copies the original recording without re-encoding, staging beside the destination before an atomic replacement. **Advanced output** is collapsed by default and resets when another run starts. It contains generated-file Finder links, output/model paths, exact submitted options, result JSON and any partial batch receipt. Playback, workflow actions, errors and truncation warnings remain outside it. Neither frontend adds memory caps or allocation guards.
 
 GUI verification is bounded functional smoke with real checkpoints: all seven workflows, both replay stages, a short recording, resume, partial batches, cancellation/recovery, readiness/error presentation and playback were exercised in a temporary native SwiftUI host. Native numerical fidelity, listening quality and performance acceptance remain deferred. System-hosted save-dialog acceptance was not completed by session automation; request serialization and FLAC creation/replacement/failure preservation were exercised separately.
 
+### Score workspace
+
+**Plan score** reserves the large, persistent right-hand pane for notation, with request settings and activity in a narrower, resizable left-hand column. Both columns stay within the window when resized; the score does not move into the results inspector or disappear when the request form scrolls. The placement is a working score surface for future editing, but currently provides only viewing, zoom and scrolling.
+
+After successful planning, the application reads the actual saved `score.abc` as UTF-8 on the worker and presents it directly. The last score remains available during the app session when navigating or running another workflow. Replanning keeps the previous score visible and interactive until the replacement is loaded. Cancellation, failed planning or a score-loading error retains it with an explicit previous-score message, never presenting it as the new result. Token-limited notation carries a warning beside the score.
+
+An intentional `cot = off` plan has no notation and clears the previous score to the empty state; an unexpectedly missing or unreadable score reports a loading error instead. No plan files are rewritten. **Render this plan** still passes the intact plan folder to **Render plan**; file browsing belongs under **Advanced output**, not on the score surface.
+
+Integration verification exercised the actual Xcode-built application in an isolated bundle: saved and model-generated ABC, cancellation, failed regeneration, retained-score navigation, valid score-off plans, hidden/expanded artifacts, render-plan handoff, zoom, appearances and window resizing. This is functional UI evidence, not numerical or performance acceptance.
+
 ### Standalone ABC score component
 
-[`ABCScoreView`](../Yueqin/Yueqin/ABCScore/ABCScoreView.swift) is a reusable, read-only SwiftUI view. It is intentionally **not connected to any workflow form, result inspector or navigation destination yet**. Its only input is notation text:
+[`ABCScoreView`](../Yueqin/Yueqin/ABCScore/ABCScoreView.swift) is the reusable, read-only SwiftUI view embedded in the score workspace. It remains independent of the application's request and result models. Its only input is notation text:
 
 ```swift
 ABCScoreView(abc: scoreText)
@@ -247,11 +257,11 @@ lyra plan request.json \
   --output outputs/plan
 ```
 
-The CLI and **Plan score** GUI workflow produce the same five-file plan:
+The CLI and **Plan score** GUI workflow normally produce the same five-file plan. An intentional `cot = off` plan omits `score.abc`:
 
 | File | Meaning |
 | --- | --- |
-| `score.abc` | Human-readable ABC notation: voices, notes/rests, rhythm, key/meter and other score directives. This is the file to preview or copy for editing. |
+| `score.abc` | Human-readable ABC notation: voices, notes/rests, rhythm, key/meter and other score directives. The GUI renders this directly in the score workspace. Copy it before external editing. |
 | `abc_tokens.npy` | The exact integer token IDs representing the planned score, stored as a NumPy-format array. Rendering reuses these IDs rather than re-tokenizing the text. |
 | `prefix.npy` | The complete saved conditioning-token prefix for subsequent generation, also a NumPy-format array. It is not another score or an audio waveform. |
 | `plan.json` | Structured plan data: request, ABC text and IDs, timing, truncation flags and effective generation configuration. |

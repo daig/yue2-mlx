@@ -20,7 +20,7 @@ enum WorkflowKind: String, CaseIterable, Identifiable, Sendable {
   var subtitle: String {
     switch self {
     case .generate: "Generate a song from style, lyrics and an optional score."
-    case .plan: "Create an editable score before rendering audio."
+    case .plan: "Generate and review the score before rendering audio."
     case .renderPlan: "Render audio from a saved plan directory."
     case .replay: "Decode or synthesize a saved song's artifacts."
     case .batch: "Run requests from a JSONL file serially."
@@ -31,7 +31,7 @@ enum WorkflowKind: String, CaseIterable, Identifiable, Sendable {
   var actionTitle: String {
     switch self {
     case .generate: "Generate"
-    case .plan: "Plan"
+    case .plan: "Plan score"
     case .renderPlan: "Render"
     case .replay: "Replay"
     case .batch: "Run batch"

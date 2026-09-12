@@ -118,7 +118,7 @@ open Yueqin/Yueqin.xcodeproj
 
 Start with **Prepare models**, or expand **Engine settings** and select existing converted-model and VAE directories. Use **Diagnostics** to check readiness. **Generate song** accepts composed inputs or an existing request JSON file; **Plan score**, **Render plan**, **Replay artifacts** and **Batch** expose the corresponding native workflows. See the [GUI workflow guide](docs/usage.md#yueqin-macos-app).
 
-A self-contained [ABC notation viewer component](docs/usage.md#standalone-abc-score-component) is available for future placement. It renders offline with native zoom and parser-warning controls; it is not yet wired into the app's workflow UI.
+**Plan score** gives notation the main workspace, with request controls and activity in a narrower, resizable column. The offline [ABC viewer](docs/usage.md#standalone-abc-score-component) displays the saved score directly; generated files, output paths and exact JSON remain available under collapsed **Advanced output**. The score is read-only for now, with no editing controls.
 
 This is a local-development app, not a self-contained notarized distribution. It still links Homebrew libsndfile. App Sandbox is disabled for native filesystem/cache access and shared GPU ownership; Hardened Runtime remains enabled with library validation disabled for that external dependency.
 
