@@ -1,9 +1,9 @@
-#include "lyra/nar.hpp"
 #include "lyra/nar_attention.hpp"
-#include <mlx/backend/metal/metal.h>
+#include "lyra/nar.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <mlx/backend/metal/metal.h>
 #include <regex>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
@@ -19,8 +19,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -33,18 +33,25 @@ namespace lyra {
 bool mpp_attention_available() {
   static const bool available = [] {
 #ifdef __APPLE__
-    if (!mx::metal::is_available()) return false;
+    if (!mx::metal::is_available())
+      return false;
     char version[64]{};
     size_t size = sizeof(version);
-    if (sysctlbyname("kern.osproductversion", version, &size, nullptr, 0) != 0) return false;
+    if (sysctlbyname("kern.osproductversion", version, &size, nullptr, 0) != 0)
+      return false;
     int major = 0, minor = 0;
-    if (std::sscanf(version, "%d.%d", &major, &minor) < 1 || major < 26 || (major == 26 && minor < 2)) return false;
-    const auto& info = mx::metal::device_info();
+    if (std::sscanf(version, "%d.%d", &major, &minor) < 1 || major < 26 ||
+        (major == 26 && minor < 2))
+      return false;
+    const auto &info = mx::device_info(mx::Device(mx::Device::gpu));
     auto it = info.find("architecture");
-    if (it == info.end() || !std::holds_alternative<std::string>(it->second)) return false;
+    if (it == info.end() || !std::holds_alternative<std::string>(it->second))
+      return false;
     std::smatch match;
-    const auto& architecture = std::get<std::string>(it->second);
-    if (!std::regex_match(architecture, match, std::regex("applegpu_g([0-9]+)([a-z])"))) return false;
+    const auto &architecture = std::get<std::string>(it->second);
+    if (!std::regex_match(architecture, match,
+                          std::regex("applegpu_g([0-9]+)([a-z])")))
+      return false;
     return std::stoi(match[1].str()) >= (match[2].str() == "p" ? 18 : 17);
 #else
     return false;
@@ -53,11 +60,14 @@ bool mpp_attention_available() {
   return available;
 }
 namespace {
-mx::array mpp_attention(const mx::array& query, const mx::array& key, const mx::array& value) {
+mx::array mpp_attention(const mx::array &query, const mx::array &key,
+                        const mx::array &value) {
   static const auto kernel = [] {
     mx::CompileOptions options;
     options.math_mode = mx::MathMode::Safe;
-    return mx::fast::metal_kernel("lyra_nar_precise_attention", {"query", "key", "value"}, {"output"}, R"METAL(
+    return mx::fast::metal_kernel(
+        "lyra_nar_precise_attention", {"query", "key", "value"}, {"output"},
+        R"METAL(
 constexpr auto qk_desc = mpp::tensor_ops::matmul2d_descriptor(
     16, 16, 32, false, true, false,
     mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
@@ -191,47 +201,71 @@ for (uint dim_block = 0; dim_block < 4; ++dim_block) {
                 T(output_accum[dim_block][i] / row_sum[i / 8]);
     }
 }
-)METAL", "#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>\n", true, false, options);
+)METAL",
+        "#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>\n",
+        true, false, options);
   }();
   const int length = query.shape(2), heads = query.shape(1);
-  return kernel({query,key,value}, {query.shape()}, {mx::bfloat16},
-    {((length+63)/64)*128,heads,query.shape(0)}, {128,1,1},
-    {{"T",mx::bfloat16},{"HQ",heads},{"HK",key.shape(1)},{"QL",length},{"KL",key.shape(2)}},
-    std::nullopt, false, {})[0];
+  return kernel({query, key, value}, {query.shape()}, {mx::bfloat16},
+                {((length + 63) / 64) * 128, heads, query.shape(0)},
+                {128, 1, 1},
+                {{"T", mx::bfloat16},
+                 {"HQ", heads},
+                 {"HK", key.shape(1)},
+                 {"QL", length},
+                 {"KL", key.shape(2)}},
+                std::nullopt, false, {})[0];
 }
-mx::array tokens(const mx::array& x, int begin, int end) {
-  return mx::slice(x,{0,0,begin,0},{x.shape(0),x.shape(1),end,x.shape(3)});
+mx::array tokens(const mx::array &x, int begin, int end) {
+  return mx::slice(x, {0, 0, begin, 0},
+                   {x.shape(0), x.shape(1), end, x.shape(3)});
 }
-}
-mx::array nar_attention(const mx::array& query, const mx::array& key, const mx::array& value,
-                        bool causal, int query_chunk_size) {
-  if (query.ndim()!=4 || key.ndim()!=4 || value.shape()!=key.shape())
-    throw Error("ValueError","Expected attention Q/K/V shaped [batch,heads,tokens,dim]");
-  if (query.shape(0)!=key.shape(0) || query.shape(3)!=key.shape(3))
-    throw Error("ValueError","Attention batch and head dimensions do not match");
-  if (key.shape(1)<1 || query.shape(1)<1 || query.shape(1)%key.shape(1))
-    throw Error("ValueError","Invalid grouped-query head count");
-  if (query.shape(2)<1 || key.shape(2)<1) throw Error("ValueError","Attention sequences must be nonempty");
-  if (causal && query.shape(2)!=key.shape(2)) throw Error("ValueError","Causal prefill requires equal query and key lengths");
-  if (query_chunk_size<1) throw Error("ValueError","query_chunk_size must be a positive integer");
-  if (!causal && query.dtype()==mx::bfloat16 && key.dtype()==mx::bfloat16 && value.dtype()==mx::bfloat16 &&
-      query.shape(3)==128 && query.shape(2)>8 && query_chunk_size>=64 && mpp_attention_available())
-    return mpp_attention(query,key,value);
-  const bool precise = causal || std::min(query_chunk_size,query.shape(2))>8;
-  auto precise_key = precise ? mx::astype(key,mx::float32) : key;
-  auto precise_value = precise ? mx::astype(value,mx::float32) : value;
+} // namespace
+mx::array nar_attention(const mx::array &query, const mx::array &key,
+                        const mx::array &value, bool causal,
+                        int query_chunk_size) {
+  if (query.ndim() != 4 || key.ndim() != 4 || value.shape() != key.shape())
+    throw Error("ValueError",
+                "Expected attention Q/K/V shaped [batch,heads,tokens,dim]");
+  if (query.shape(0) != key.shape(0) || query.shape(3) != key.shape(3))
+    throw Error("ValueError",
+                "Attention batch and head dimensions do not match");
+  if (key.shape(1) < 1 || query.shape(1) < 1 || query.shape(1) % key.shape(1))
+    throw Error("ValueError", "Invalid grouped-query head count");
+  if (query.shape(2) < 1 || key.shape(2) < 1)
+    throw Error("ValueError", "Attention sequences must be nonempty");
+  if (causal && query.shape(2) != key.shape(2))
+    throw Error("ValueError",
+                "Causal prefill requires equal query and key lengths");
+  if (query_chunk_size < 1)
+    throw Error("ValueError", "query_chunk_size must be a positive integer");
+  if (!causal && query.dtype() == mx::bfloat16 && key.dtype() == mx::bfloat16 &&
+      value.dtype() == mx::bfloat16 && query.shape(3) == 128 &&
+      query.shape(2) > 8 && query_chunk_size >= 64 && mpp_attention_available())
+    return mpp_attention(query, key, value);
+  const bool precise = causal || std::min(query_chunk_size, query.shape(2)) > 8;
+  auto precise_key = precise ? mx::astype(key, mx::float32) : key;
+  auto precise_value = precise ? mx::astype(value, mx::float32) : value;
   std::vector<mx::array> outputs;
-  outputs.reserve(1+(query.shape(2)-1)/query_chunk_size);
-  const float scale = static_cast<float>(std::pow(query.shape(3),-0.5));
-  for (int start=0;start<query.shape(2);) {
-    int end=start+std::min(query_chunk_size,query.shape(2)-start);
-    auto used_key = causal ? tokens(precise_key,0,end) : end-start<=8 ? key : precise_key;
-    auto used_value = causal ? tokens(precise_value,0,end) : end-start<=8 ? value : precise_value;
+  outputs.reserve(1 + (query.shape(2) - 1) / query_chunk_size);
+  const float scale = static_cast<float>(std::pow(query.shape(3), -0.5));
+  for (int start = 0; start < query.shape(2);) {
+    int end = start + std::min(query_chunk_size, query.shape(2) - start);
+    auto used_key = causal             ? tokens(precise_key, 0, end)
+                    : end - start <= 8 ? key
+                                       : precise_key;
+    auto used_value = causal             ? tokens(precise_value, 0, end)
+                      : end - start <= 8 ? value
+                                         : precise_value;
     std::optional<mx::array> mask;
-    if (causal) mask=mx::less_equal(mx::reshape(mx::arange(end),{1,end}),mx::reshape(mx::arange(start,end),{end-start,1}));
-    outputs.push_back(model_ops::sdpa(tokens(query,start,end),used_key,used_value,scale,mask));
-    start=end;
+    if (causal)
+      mask =
+          mx::less_equal(mx::reshape(mx::arange(end), {1, end}),
+                         mx::reshape(mx::arange(start, end), {end - start, 1}));
+    outputs.push_back(model_ops::sdpa(tokens(query, start, end), used_key,
+                                      used_value, scale, mask));
+    start = end;
   }
-  return outputs.size()==1 ? outputs.front() : mx::concatenate(outputs,2);
+  return outputs.size() == 1 ? outputs.front() : mx::concatenate(outputs, 2);
 }
-}
+} // namespace lyra

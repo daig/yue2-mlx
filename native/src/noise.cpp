@@ -7,9 +7,10 @@ Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
 Copyright (c) 2012-2014 Deepmind Technologies    (Koray Kavukcuoglu)
 Copyright (c) 2011-2012 NEC Laboratories America (Koray Kavukcuoglu)
 Copyright (c) 2011-2013 NYU                      (Clement Farabet)
-Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)
-Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
-Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)
+Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou,
+Iain Melvin, Jason Weston) Copyright (c) 2006      Idiap Research Institute
+(Samy Bengio) Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert,
+Samy Bengio, Johnny Mariethoz)
 
 From Caffe2:
 
@@ -67,8 +68,8 @@ modification, are permitted provided that the following conditions are met:
    notice, this list of conditions and the following disclaimer in the
    documentation and/or other materials provided with the distribution.
 
-3. Neither the names of Facebook, Deepmind Technologies, NYU, NEC Laboratories America
-   and IDIAP Research Institute nor the names of its contributors may be
+3. Neither the names of Facebook, Deepmind Technologies, NYU, NEC Laboratories
+America and IDIAP Research Institute nor the names of its contributors may be
    used to endorse or promote products derived from this software without
    specific prior written permission.
 
@@ -139,22 +140,28 @@ class TorchMT19937 {
   int left_ = 1;
   unsigned next_ = 0;
   static uint32_t twist(uint32_t u, uint32_t v) {
-    return (((u & 0x80000000u) | (v & 0x7fffffffu)) >> 1) ^ ((v & 1) ? 0x9908b0dfu : 0u);
+    return (((u & 0x80000000u) | (v & 0x7fffffffu)) >> 1) ^
+           ((v & 1) ? 0x9908b0dfu : 0u);
   }
   void advance() {
     left_ = 624;
     next_ = 0;
-    for (unsigned i = 0; i < 227; ++i) state_[i] = state_[i + 397] ^ twist(state_[i], state_[i + 1]);
-    for (unsigned i = 227; i < 623; ++i) state_[i] = state_[i - 227] ^ twist(state_[i], state_[i + 1]);
+    for (unsigned i = 0; i < 227; ++i)
+      state_[i] = state_[i + 397] ^ twist(state_[i], state_[i + 1]);
+    for (unsigned i = 227; i < 623; ++i)
+      state_[i] = state_[i - 227] ^ twist(state_[i], state_[i + 1]);
     state_[623] = state_[396] ^ twist(state_[623], state_[0]);
   }
- public:
+
+public:
   explicit TorchMT19937(uint64_t seed) {
     state_[0] = static_cast<uint32_t>(seed);
-    for (uint32_t i = 1; i < 624; ++i) state_[i] = 1812433253u * (state_[i-1] ^ (state_[i-1] >> 30)) + i;
+    for (uint32_t i = 1; i < 624; ++i)
+      state_[i] = 1812433253u * (state_[i - 1] ^ (state_[i - 1] >> 30)) + i;
   }
   uint32_t next() {
-    if (--left_ == 0) advance();
+    if (--left_ == 0)
+      advance();
     uint32_t y = state_[next_++];
     y ^= y >> 11;
     y ^= (y << 7) & 0x9d2c5680u;
@@ -164,7 +171,7 @@ class TorchMT19937 {
   }
   float uniform() { return static_cast<float>(next() & 0xffffffu) * 0x1p-24f; }
 };
-void normal_block(float* data) {
+void normal_block(float *data) {
   for (int j = 0; j < 8; ++j) {
     const float u1 = 1.0f - data[j];
     const float u2 = data[j + 8];
@@ -175,22 +182,26 @@ void normal_block(float* data) {
     data[j + 8] = radius * std::sin(theta) * 1.0f + 0.0f;
   }
 }
-}
+} // namespace
 FloatMatrix initial_noise(int frames, uint64_t seed) {
-  if (frames < 1) throw Error("ValueError", "frames must be positive");
+  if (frames < 1)
+    throw Error("ValueError", "frames must be positive");
   FloatMatrix result{frames, 64, {}};
   result.values.resize(static_cast<size_t>(frames) * 64);
   TorchMT19937 generator(seed);
-  for (float& value : result.values) value = generator.uniform();
+  for (float &value : result.values)
+    value = generator.uniform();
   const size_t size = result.values.size();
-  for (size_t i = 0; i + 15 < size; i += 16) normal_block(result.values.data() + i);
+  for (size_t i = 0; i + 15 < size; i += 16)
+    normal_block(result.values.data() + i);
   // The public [frames,64] contract is always divisible by 16. This is the
   // upstream tail rule, retained explicitly rather than changing draw order.
   if (size % 16) {
-    float* tail = result.values.data() + size - 16;
-    for (int i = 0; i < 16; ++i) tail[i] = generator.uniform();
+    float *tail = result.values.data() + size - 16;
+    for (int i = 0; i < 16; ++i)
+      tail[i] = generator.uniform();
     normal_block(tail);
   }
   return result;
 }
-}
+} // namespace lyra
