@@ -82,6 +82,26 @@ def test_attention_preserves_fp32_probabilities_before_bf16_output():
     )
 
 
+@pytest.mark.parametrize("query_chunk_size", [7, 64])
+def test_bf16_attention_preserves_batch_gqa_and_partial_tiles(query_chunk_size):
+    rng = np.random.default_rng(62841)
+    query, key, value = [
+        mx.array(rng.normal(size=shape).astype(np.float32), dtype=mx.bfloat16)
+        for shape in ((2, 4, 65, 128), (2, 2, 97, 128), (2, 2, 97, 128))
+    ]
+    q, k, v = [np.asarray(a.astype(mx.float32)).astype(np.float64) for a in (query, key, value)]
+    k, v = np.repeat(k, 2, axis=1), np.repeat(v, 2, axis=1)
+    scores = np.einsum("bhqd,bhkd->bhqk", q, k, optimize=False) * 128**-0.5
+    probabilities = np.exp(scores - scores.max(axis=-1, keepdims=True))
+    probabilities /= probabilities.sum(axis=-1, keepdims=True)
+    expected = np.einsum("bhqk,bhkd->bhqd", probabilities, v, optimize=False)
+    actual = _attention(query, key, value, causal=False, query_chunk_size=query_chunk_size)
+    # BF16 output rounding, with a small FP32 accumulation allowance near zero.
+    np.testing.assert_allclose(
+        np.asarray(actual.astype(mx.float32)), expected, rtol=0.004, atol=2e-6,
+    )
+
+
 def test_cancelled_solver_can_restart_from_original_noise():
     initial = np.linspace(-2, 2, 128, dtype=np.float32).reshape(2, 64)
     flow = AnalyticFlow(initial)

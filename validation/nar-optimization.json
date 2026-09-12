@@ -1,0 +1,560 @@
+{
+  "schema_version": 1,
+  "scope": "Precise BF16 acoustic-attention optimization on M5; not complete YuE2 acceptance or a PyTorch/MPS speedup.",
+  "device": {
+    "device_name": "Apple M5",
+    "max_recommended_working_set_size": 26800603136,
+    "memory_size": 34359738368,
+    "architecture": "applegpu_g17g",
+    "max_buffer_length": 20100448256,
+    "resource_limit": 499000
+  },
+  "implementations": {
+    "src/lyra/nar.py": "c01d2b66564cd063f320adc8cab8a89dfd78d1e17ceddffd297dc68d02bb47e7",
+    "src/lyra/_nar_attention.py": "7f5d7029887476348705dda24122d0cc6cb08c6518a400ab85deca0335f11b8e",
+    "outputs/nar-optimization/baseline/nar.py": "55efe6e36a7c15d0fa2f5c035a1eb8b70fb76a3acb708c0588e056d92d0d4fa5"
+  },
+  "ar_and_vae_implementation_unchanged": true,
+  "arithmetic": {
+    "query_tile": 64,
+    "key_tile": 16,
+    "conditioning_cache_and_solver_dtype": "bfloat16",
+    "softmax_and_accumulator_dtype": "float32",
+    "mpp_relaxed_precision": false,
+    "compiler_math_mode": "safe",
+    "tf32_enabled": false,
+    "solver_steps": 32,
+    "velocity_evaluations": 64,
+    "key_visibility": "full",
+    "original_acoustic_chunks_preserved": true
+  },
+  "methodology": {
+    "pair_orders": [
+      [
+        "baseline",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "baseline"
+      ]
+    ],
+    "description": "Two sequential paired processes with reversed implementation order, shared loaded BF16 weights within each pair, identical saved inputs, independent conditioning prefill and one excluded warmup velocity per run. Stage timings include prefill plus the full 32-step solve, excluding model loading, warmup and decoding. Short clips precede the full-song pair. GPU workloads are serialized.",
+    "limitations": "Two runs per implementation, not a confidence interval or a new three-run end-to-end acceptance campaign. Step times vary substantially with run position; order is counterbalanced but GPU temperature/clocks were not measured or controlled."
+  },
+  "full_song": {
+    "frames": 4493,
+    "natural_audio_duration_seconds": 179.71866666666668,
+    "source": "outputs/acceptance-sustain-bf16-precise/tonight_awake_1",
+    "inputs": {
+      "prefix.npy": "1ca2b96aa6346fb9b63fa17840b2f81054866d1cd95b134548d6e724d4725b4a",
+      "semantic.npy": "6a937b2a0449f8591714d52f58c491d242f2434856fd83587d81e5a26468b49c",
+      "noise.npy": "88d188fefe58413a695b2ae4afc175eeb07b1bcf9de131a976f7723ded33dee2"
+    },
+    "summary": {
+      "runs_per_implementation": 2,
+      "baseline_mean_nar_seconds": 524.1794959790132,
+      "candidate_mean_nar_seconds": 453.11222120848834,
+      "nar_speedup": 1.1568425468220267,
+      "nar_time_reduction_percent": 13.557812794220814,
+      "baseline_mean_solve_seconds": 518.8692514165014,
+      "candidate_mean_solve_seconds": 447.7554949375044
+    },
+    "baseline_matches_original_saved_latents": true,
+    "port_comparison": {
+      "max_abs": 2.173828125,
+      "rms_error": 0.0232548425029709,
+      "relative_rms_error": 0.02379937922055239,
+      "different_elements": 215292,
+      "elements": 287552,
+      "largest_differences": [
+        {
+          "frame": 1403,
+          "channel": 38,
+          "baseline": -1.7578125,
+          "candidate": 0.416015625,
+          "absolute_difference": 2.173828125
+        },
+        {
+          "frame": 1404,
+          "channel": 38,
+          "baseline": -0.357421875,
+          "candidate": 1.609375,
+          "absolute_difference": 1.966796875
+        },
+        {
+          "frame": 1405,
+          "channel": 38,
+          "baseline": 0.037109375,
+          "candidate": 1.7421875,
+          "absolute_difference": 1.705078125
+        },
+        {
+          "frame": 1406,
+          "channel": 14,
+          "baseline": -1.4296875,
+          "candidate": 0.0322265625,
+          "absolute_difference": 1.4619140625
+        },
+        {
+          "frame": 1406,
+          "channel": 30,
+          "baseline": -0.98828125,
+          "candidate": 0.470703125,
+          "absolute_difference": 1.458984375
+        }
+      ],
+      "absolute_difference_percentiles": {
+        "50": 0.00390625,
+        "90": 0.015625,
+        "99": 0.0390625,
+        "99.9": 0.28125,
+        "99.99": 0.8754783203124816
+      },
+      "elements_above_0_2": 440,
+      "elements_above_1": 22,
+      "acceptance": "Diagnostic old-port versus new-port comparison only; no full-song source oracle or derived full-song bounds available. Non-bitwise output and localized larger differences remain subject to full-song comparison and listening."
+    },
+    "repeated_output_hashes_match": {
+      "baseline": true,
+      "candidate": true
+    }
+  },
+  "short_clips": [
+    {
+      "frames": 64,
+      "summary": {
+        "runs_per_implementation": 2,
+        "baseline_mean_nar_seconds": 3.2518969379889313,
+        "candidate_mean_nar_seconds": 3.1496153130137827,
+        "nar_speedup": 1.0324743229919333,
+        "nar_time_reduction_percent": 3.1452911001048633,
+        "baseline_mean_solve_seconds": 3.0511285419925116,
+        "candidate_mean_solve_seconds": 2.9439599170000292
+      }
+    },
+    {
+      "frames": 400,
+      "summary": {
+        "runs_per_implementation": 2,
+        "baseline_mean_nar_seconds": 11.51073252101196,
+        "candidate_mean_nar_seconds": 10.568209061981179,
+        "nar_speedup": 1.0891847855680186,
+        "nar_time_reduction_percent": 8.188214410423289,
+        "baseline_mean_solve_seconds": 11.238255541480612,
+        "candidate_mean_solve_seconds": 10.29284256248502
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "report": "outputs/nar-optimization/full-song/report.json",
+      "report_sha256": "c8879ae02f41da70b8792a8b2b53bab30a193ba008646d04d46800b4f4ef07aa",
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "runs": [
+        {
+          "name": "baseline",
+          "velocity_calls": 64,
+          "prefill_seconds": 4.321604500000831,
+          "geometry": {
+            "queries": 4495,
+            "conditioning_keys": 7028,
+            "keys": 11523,
+            "layers": 28
+          },
+          "warmup_velocity_seconds": 6.170639666961506,
+          "warmup_velocity_evaluations": 1,
+          "solve_seconds": 515.5434087080066,
+          "nar_seconds": 519.8650132080074,
+          "latents_sha256": "fd0bb966249ae9d8007026f563f34402af93e06ec750944ddc3ad3330229c06c"
+        },
+        {
+          "name": "candidate",
+          "velocity_calls": 64,
+          "prefill_seconds": 6.5044503749813884,
+          "geometry": {
+            "queries": 4495,
+            "conditioning_keys": 7028,
+            "keys": 11523,
+            "layers": 28
+          },
+          "warmup_velocity_seconds": 7.84952887496911,
+          "warmup_velocity_evaluations": 1,
+          "solve_seconds": 498.14477158302907,
+          "nar_seconds": 504.64922195801046,
+          "latents_sha256": "d27634864293f0b6c2bbedacff5e1846fa99b84a9e727c398ec0e0c85bb84423"
+        }
+      ],
+      "short_clips": [
+        {
+          "oracle": "oracle-nar",
+          "oracle_sha256": "6aafedd2f1c9f5b33de260d9a70d2b32dd8dffd67eaa41c76c8ed1b06d3c2c1a",
+          "runs": [
+            {
+              "name": "baseline",
+              "frames": 64,
+              "prefill_seconds": 0.2423337500076741,
+              "solve_seconds": 3.063667833979707,
+              "nar_seconds": 3.3060015839873813,
+              "warmup_velocity_evaluations": 1
+            },
+            {
+              "name": "candidate",
+              "frames": 64,
+              "prefill_seconds": 0.17316825001034886,
+              "solve_seconds": 2.9578892500139773,
+              "nar_seconds": 3.131057500024326,
+              "warmup_velocity_evaluations": 1
+            }
+          ]
+        },
+        {
+          "oracle": "oracle-nar-400",
+          "oracle_sha256": "cee9a5f36426c16ec2c3a0aea4c074031879b3371a939963e80c99623d8a8fb8",
+          "runs": [
+            {
+              "name": "baseline",
+              "frames": 400,
+              "prefill_seconds": 0.2757870000205003,
+              "solve_seconds": 11.267307624977548,
+              "nar_seconds": 11.543094624998048,
+              "warmup_velocity_evaluations": 1
+            },
+            {
+              "name": "candidate",
+              "frames": 400,
+              "prefill_seconds": 0.2693997079622932,
+              "solve_seconds": 10.320363708015066,
+              "nar_seconds": 10.589763415977359,
+              "warmup_velocity_evaluations": 1
+            }
+          ]
+        }
+      ],
+      "solve_speedup": 1.0349268688893136,
+      "nar_speedup": 1.0301512230435244,
+      "port_comparison": {
+        "max_abs": 2.173828125,
+        "rms_error": 0.0232548425029709,
+        "relative_rms_error": 0.02379937922055239,
+        "different_elements": 215292,
+        "elements": 287552
+      },
+      "inputs": {
+        "prefix.npy": "1ca2b96aa6346fb9b63fa17840b2f81054866d1cd95b134548d6e724d4725b4a",
+        "semantic.npy": "6a937b2a0449f8591714d52f58c491d242f2434856fd83587d81e5a26468b49c",
+        "noise.npy": "88d188fefe58413a695b2ae4afc175eeb07b1bcf9de131a976f7723ded33dee2"
+      },
+      "implementations": {
+        "src/lyra/nar.py": "c01d2b66564cd063f320adc8cab8a89dfd78d1e17ceddffd297dc68d02bb47e7",
+        "src/lyra/_nar_attention.py": "7f5d7029887476348705dda24122d0cc6cb08c6518a400ab85deca0335f11b8e",
+        "outputs/nar-optimization/baseline/nar.py": "55efe6e36a7c15d0fa2f5c035a1eb8b70fb76a3acb708c0588e056d92d0d4fa5"
+      },
+      "device": {
+        "device_name": "Apple M5",
+        "max_recommended_working_set_size": 26800603136,
+        "memory_size": 34359738368,
+        "architecture": "applegpu_g17g",
+        "max_buffer_length": 20100448256,
+        "resource_limit": 499000
+      },
+      "resources": {
+        "report": "outputs/nar-optimization/full-song/resources.json",
+        "report_sha256": "51dfed7645ab37d181ea666973a60a3c9745a10598e2ac059d989fe4e9f1f8f1",
+        "memory_budget_gib": 16,
+        "tf32_enabled": false,
+        "sampled_peak_footprint_bytes": 9357973672,
+        "process_lifetime_peak_footprint_bytes": 9736001680,
+        "minimum_system_available_bytes": 8918433792,
+        "swap_out_delta_bytes": 0,
+        "swap_in_delta_bytes": 786432,
+        "ac_connected_all_samples": true,
+        "exception": null,
+        "monitor_error": null
+      }
+    },
+    {
+      "report": "outputs/nar-optimization/full-song-reverse/report.json",
+      "report_sha256": "2f2f04c123e88ae5275385b7345cd8d227204c2e25c58d3009c2277df6fd8bf8",
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "runs": [
+        {
+          "name": "candidate",
+          "velocity_calls": 64,
+          "prefill_seconds": 4.2090021669864655,
+          "geometry": {
+            "queries": 4495,
+            "conditioning_keys": 7028,
+            "keys": 11523,
+            "layers": 28
+          },
+          "warmup_velocity_seconds": 4.494459708977956,
+          "warmup_velocity_evaluations": 1,
+          "solve_seconds": 397.36621829197975,
+          "nar_seconds": 401.5752204589662,
+          "latents_sha256": "d27634864293f0b6c2bbedacff5e1846fa99b84a9e727c398ec0e0c85bb84423"
+        },
+        {
+          "name": "baseline",
+          "velocity_calls": 64,
+          "prefill_seconds": 6.298884625022765,
+          "geometry": {
+            "queries": 4495,
+            "conditioning_keys": 7028,
+            "keys": 11523,
+            "layers": 28
+          },
+          "warmup_velocity_seconds": 8.504095542011783,
+          "warmup_velocity_evaluations": 1,
+          "solve_seconds": 522.1950941249961,
+          "nar_seconds": 528.4939787500189,
+          "latents_sha256": "fd0bb966249ae9d8007026f563f34402af93e06ec750944ddc3ad3330229c06c"
+        }
+      ],
+      "short_clips": [
+        {
+          "oracle": "oracle-nar",
+          "oracle_sha256": "6aafedd2f1c9f5b33de260d9a70d2b32dd8dffd67eaa41c76c8ed1b06d3c2c1a",
+          "runs": [
+            {
+              "name": "candidate",
+              "frames": 64,
+              "prefill_seconds": 0.23814254201715812,
+              "solve_seconds": 2.930030583986081,
+              "nar_seconds": 3.1681731260032393,
+              "warmup_velocity_evaluations": 1
+            },
+            {
+              "name": "baseline",
+              "frames": 64,
+              "prefill_seconds": 0.15920304198516533,
+              "solve_seconds": 3.038589250005316,
+              "nar_seconds": 3.1977922919904813,
+              "warmup_velocity_evaluations": 1
+            }
+          ]
+        },
+        {
+          "oracle": "oracle-nar-400",
+          "oracle_sha256": "cee9a5f36426c16ec2c3a0aea4c074031879b3371a939963e80c99623d8a8fb8",
+          "runs": [
+            {
+              "name": "candidate",
+              "frames": 400,
+              "prefill_seconds": 0.28133329103002325,
+              "solve_seconds": 10.265321416954976,
+              "nar_seconds": 10.546654707984999,
+              "warmup_velocity_evaluations": 1
+            },
+            {
+              "name": "baseline",
+              "frames": 400,
+              "prefill_seconds": 0.26916695904219523,
+              "solve_seconds": 11.209203457983676,
+              "nar_seconds": 11.478370417025872,
+              "warmup_velocity_evaluations": 1
+            }
+          ]
+        }
+      ],
+      "solve_speedup": 1.3141406342229465,
+      "nar_speedup": 1.3160522657398914,
+      "port_comparison": {
+        "max_abs": 2.173828125,
+        "rms_error": 0.0232548425029709,
+        "relative_rms_error": 0.02379937922055239,
+        "different_elements": 215292,
+        "elements": 287552
+      },
+      "repeated_output_hashes_match": {
+        "baseline": true,
+        "candidate": true
+      },
+      "inputs": {
+        "prefix.npy": "1ca2b96aa6346fb9b63fa17840b2f81054866d1cd95b134548d6e724d4725b4a",
+        "semantic.npy": "6a937b2a0449f8591714d52f58c491d242f2434856fd83587d81e5a26468b49c",
+        "noise.npy": "88d188fefe58413a695b2ae4afc175eeb07b1bcf9de131a976f7723ded33dee2"
+      },
+      "implementations": {
+        "src/lyra/nar.py": "c01d2b66564cd063f320adc8cab8a89dfd78d1e17ceddffd297dc68d02bb47e7",
+        "src/lyra/_nar_attention.py": "7f5d7029887476348705dda24122d0cc6cb08c6518a400ab85deca0335f11b8e",
+        "outputs/nar-optimization/baseline/nar.py": "55efe6e36a7c15d0fa2f5c035a1eb8b70fb76a3acb708c0588e056d92d0d4fa5"
+      },
+      "device": {
+        "device_name": "Apple M5",
+        "max_recommended_working_set_size": 26800603136,
+        "memory_size": 34359738368,
+        "architecture": "applegpu_g17g",
+        "max_buffer_length": 20100448256,
+        "resource_limit": 499000
+      },
+      "resources": {
+        "report": "outputs/nar-optimization/full-song-reverse/resources.json",
+        "report_sha256": "dbdc7ffd5b9b228637e6345a9654146ad00aa287bbf15418f49486dda5826e2d",
+        "memory_budget_gib": 16,
+        "tf32_enabled": false,
+        "sampled_peak_footprint_bytes": 9285163152,
+        "process_lifetime_peak_footprint_bytes": 9354746000,
+        "minimum_system_available_bytes": 8912224256,
+        "swap_out_delta_bytes": 0,
+        "swap_in_delta_bytes": 114688,
+        "ac_connected_all_samples": true,
+        "exception": null,
+        "monitor_error": null
+      }
+    }
+  ],
+  "fidelity": [
+    {
+      "frames": 64,
+      "source_report": "outputs/nar-optimization/final-64/fidelity.json",
+      "source_report_sha256": "4944e7ee59cc54171d1075187fd0e0f91ba7397067b91425d8e4ffa9bee68266",
+      "source_status": "passed",
+      "source_tensor_count": 82,
+      "source_failures": [],
+      "invocation_sha256": "478193e72f5602ae6363704e62b30b1c95db058ae31f7f24e2e2e1c8b35d6ae0",
+      "oracle_sha256": "6aafedd2f1c9f5b33de260d9a70d2b32dd8dffd67eaa41c76c8ed1b06d3c2c1a",
+      "conversion_sha256": "f22b6c326a7291aba47b1f662d0f62458b530cc46f717d6a61e872c7031bebd0",
+      "limits_sha256": "d6941a1187207a28194a8e91384f84fd64eb8668745dae8a5fc6bad069e36b24",
+      "execution": {
+        "frames": 64,
+        "solver_steps": 32,
+        "state_transition": "production_bf16_midpoint_arithmetic",
+        "production_solve_complete": true,
+        "production_velocity_evaluations": 64,
+        "conditioning_dtype": "bfloat16",
+        "solver_dtype": "bfloat16",
+        "query_chunk_size": 256,
+        "key_visibility": "full_conditioning_and_acoustic_state"
+      },
+      "latent_metrics": {
+        "max_abs": 0.203125,
+        "rms_error": 0.019687636975396525,
+        "reference_rms": 1.2424660772601441,
+        "relative_rms_error": 0.01584561328129877,
+        "cosine": 0.9998744748808525,
+        "p99_abs": 0.0703125
+      },
+      "fp32_anchor": {
+        "report": "outputs/nar-optimization/final-64/precision-anchor.json",
+        "report_sha256": "d9b2b15434df5d1ae282d4f2485a72cf82591c5bf5433c300c2a73fb334623e9",
+        "status": "passed",
+        "reference_comparison_status": "passed",
+        "tensor_count": 82,
+        "failures": [],
+        "input_sha256": {
+          "anchor": "f9a76f66d56f2ccba3c961969a4449b47fd300cdeb8a7f4f9f0d1833143a046f",
+          "actual": "d4393dece79d34b993f1cb808984b4fa000eb3870eb5c136d3175ee5aad03a3c",
+          "limits": "d6941a1187207a28194a8e91384f84fd64eb8668745dae8a5fc6bad069e36b24",
+          "fidelity_report": "4944e7ee59cc54171d1075187fd0e0f91ba7397067b91425d8e4ffa9bee68266"
+        },
+        "latent_metrics": {
+          "max_abs": 0.10183703899383545,
+          "rms_error": 0.0177753260466128,
+          "reference_rms": 1.2440182915044453,
+          "relative_rms_error": 0.014288637207348718,
+          "cosine": 0.9998990271079428,
+          "p99_abs": 0.0540127933025361
+        }
+      },
+      "resource_report": "outputs/nar-optimization/final-64/resources.json",
+      "resource_report_sha256": "a7373c77684e5c737178e75ea278e860e6ee51cea8e64cfee85dac716a177ed6",
+      "sampled_peak_footprint_bytes": 7886379248,
+      "swap_out_delta_bytes": 0
+    },
+    {
+      "frames": 400,
+      "source_report": "outputs/nar-optimization/final-400/fidelity.json",
+      "source_report_sha256": "8e312a10c09f17dc1a6e279cab672a9bb7f94f1324d1c1a3e5e78cec3c20de83",
+      "source_status": "passed",
+      "source_tensor_count": 82,
+      "source_failures": [],
+      "invocation_sha256": "9d4db64bcab7a8b5c74b3b8072fa63439b04d901096d5d8c67f184dcbd1fa4c4",
+      "oracle_sha256": "cee9a5f36426c16ec2c3a0aea4c074031879b3371a939963e80c99623d8a8fb8",
+      "conversion_sha256": "f22b6c326a7291aba47b1f662d0f62458b530cc46f717d6a61e872c7031bebd0",
+      "limits_sha256": "fae2c9bbbda2ec9a3972ae0c4d77377861d8ccf97a599916d53ca1e8b52a3ee4",
+      "execution": {
+        "frames": 400,
+        "solver_steps": 32,
+        "state_transition": "production_bf16_midpoint_arithmetic",
+        "production_solve_complete": true,
+        "production_velocity_evaluations": 64,
+        "conditioning_dtype": "bfloat16",
+        "solver_dtype": "bfloat16",
+        "query_chunk_size": 256,
+        "key_visibility": "full_conditioning_and_acoustic_state"
+      },
+      "latent_metrics": {
+        "max_abs": 0.2705078125,
+        "rms_error": 0.02090764488753844,
+        "reference_rms": 1.101977739786657,
+        "relative_rms_error": 0.018972837774006362,
+        "cosine": 0.9998200027215404,
+        "p99_abs": 0.08105957031249922
+      },
+      "fp32_anchor": {
+        "report": "outputs/nar-optimization/final-400/precision-anchor.json",
+        "report_sha256": "6ee98d0a3a641bebc8f18e27484cc9b8b4e2014c01ead801d8f7afdae7d548ae",
+        "status": "passed",
+        "reference_comparison_status": "passed",
+        "tensor_count": 82,
+        "failures": [],
+        "input_sha256": {
+          "anchor": "db992b2e7a24040640eaac26d11ae824952aa3b9f74ea2e727aab1551525b2ec",
+          "actual": "df94663be8b032b7a43bd71c7af2a810c8665df69f482d6b6d63a4816df31ed5",
+          "limits": "fae2c9bbbda2ec9a3972ae0c4d77377861d8ccf97a599916d53ca1e8b52a3ee4",
+          "fidelity_report": "8e312a10c09f17dc1a6e279cab672a9bb7f94f1324d1c1a3e5e78cec3c20de83"
+        },
+        "latent_metrics": {
+          "max_abs": 0.23071396350860596,
+          "rms_error": 0.02496366572869918,
+          "reference_rms": 1.1060958127651772,
+          "relative_rms_error": 0.022569171169983387,
+          "cosine": 0.9997516731393723,
+          "p99_abs": 0.07494704008102411
+        }
+      },
+      "resource_report": "outputs/nar-optimization/final-400/resources.json",
+      "resource_report_sha256": "6db4c77f69e56db86ef447b6354af1136a025423b154a8da1a5e8a4e5a149a21",
+      "sampled_peak_footprint_bytes": 8312117776,
+      "swap_out_delta_bytes": 0
+    }
+  ],
+  "rejected_candidate": {
+    "key_tile": 32,
+    "reason": "400-frame fixed_mid_velocity_1 maximum error exceeded the unchanged bound; passing final latents alone did not waive the intermediate failure.",
+    "observed_max_abs": 0.1572265625,
+    "limit": 0.12531131505966187,
+    "final_resolution": "Restore the original 16-key online reduction width and pairwise 8-key summation order; rerun both source and FP32-anchor gates unchanged."
+  },
+  "review": {
+    "kernel": "No introduced defects found in independent shader review.",
+    "integration": "No introduced defects found in independent integration review."
+  },
+  "open_gates": [
+    "New-kernel human listening and complete-song quality are signed off. The acoustic reference comparison numerical failure is perceptually accepted.",
+    "Existing strict AR numerical failures, long-context validation and quantized listening are unchanged.",
+    "The retained 179.718667-second full-song input still fails the strict 180-second duration gate; no samples were added."
+  ],
+  "verification": {
+    "regression_suite": {
+      "command": "uv run pytest -q --junitxml=outputs/nar-optimization/tests.xml",
+      "passed": 39,
+      "failed": 0,
+      "seconds": 4.42,
+      "report": "outputs/nar-optimization/tests.xml",
+      "report_sha256": "ca7173b5fdc2ab41e991969aa16b0be3ba000ddf8da7162d5be97f5e74586cf1"
+    },
+    "lint": {
+      "command": "uv run ruff check src tests tools",
+      "status": "passed"
+    },
+    "test_coverage": "Existing cancellation-sensitive FP32 probability fixture plus added batch/GQA and partial-query/key-tail regression, including the small query-bound native fallback."
+  }
+}

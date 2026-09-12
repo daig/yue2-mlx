@@ -21,6 +21,20 @@
         "case_id": "383f774d73b0099f1b207c82"
       },
       "id": "tonight_awake"
+    },
+    {
+      "id": "tonight_awake_second_verse",
+      "title": "今晚不眠",
+      "style": "City Pop, upbeat, danceable, groovy bass, electric guitar, synth, energetic, joyful, neon city night",
+      "lyrics": "[Intro]\n\n[Verse]\n路灯眨着眼睛 偷看谁的身影\n街道哼着小调 节奏多轻盈\n晚风染成霓虹 吹乱发际线\n脚步踩着鼓点 不需要终点\n\n[Pre-Chorus]\n旋转的唱片 划破了寂静\n气泡在上升 快乐在飞行\n把烦恼抛去 别再去在意\n这里的空气 充满了魔力\n\n[Chorus]\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n[Interlude]\n\n[Pre-Chorus]\n旋转的唱片 划破了寂静\n气泡在上升 快乐在飞行\n把烦恼抛去 别再去在意\n这里的空气 充满了魔力\n\n[Chorus]\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n[Verse]\n月光停在屋顶 映出你的笑意\n远处传来汽笛 像在为我们和鸣\n把这一段旋律 写进新的日记\n等到天色微明 还要唱给你听\n\n[Bridge]\n像橘子汽水 充满了微醺的甜\n像流星划过 点亮了夜的天\n不需要理由 只要你感觉\n这一刻就是 永恒的瞬间\n\n[Chorus]\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n今晚不眠 快乐无限\n城市在狂欢 我们在中间\n自由摇摆 光芒盛开\n跟着这节拍 把心打开\n\n[Outro]\n霓虹色的风 吹向那梦\n摇摆\n闪耀\nYeah",
+      "cot": "full",
+      "seed": 12300,
+      "source": {
+        "kind": "predeclared_acceptance_extension",
+        "base_case": "tonight_awake",
+        "change": "One additional four-line verse before the bridge; all other lyrics, style and seed retained.",
+        "selection": "Declared before generating any output for this case, for current-kernel full/sustain coverage. Preserve the historical case and its strict duration failure; do not retune this case after observing its output."
+      }
     }
   ]
 }

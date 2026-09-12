@@ -23,6 +23,7 @@ from mlx_lm.models import qwen3
 from yue2.nar import Chunk, _integers, song_chunks
 from yue2.protocol import CODEC_OFFSET, CODEC_SIZE, CONTEXT, MUSIC_END, chunk_ranges
 from .ar import SourceMLP, SourceRMSNorm, SourceRoPE, _source_sdpa, _source_silu
+from ._nar_attention import attention as _mpp_attention, is_available as _mpp_available
 
 _LATENT_DIM = 64
 _TIME_EMBED_DIM = 256
@@ -435,7 +436,7 @@ def _attention(
     causal: bool,
     query_chunk_size: int | None,
 ) -> mx.array:
-    """Native GQA over complete keys, optionally tiled only along queries."""
+    """Full-key GQA with FP32 probability and accumulator arithmetic."""
     if query.ndim != 4 or key.ndim != 4 or tuple(value.shape) != tuple(key.shape):
         raise ValueError("Expected attention Q/K/V shaped [batch,heads,tokens,dim]")
     if query.shape[0] != key.shape[0] or query.shape[-1] != key.shape[-1]:
@@ -448,6 +449,17 @@ def _attention(
         raise ValueError("Causal prefill requires equal query and key lengths")
 
     block = query.shape[2] if query_chunk_size is None else query_chunk_size
+    if (
+        not causal
+        and query.dtype == key.dtype == value.dtype == mx.bfloat16
+        and query.shape[-1] == 128
+        and query.shape[2] > 8
+        and (query_chunk_size is None or query_chunk_size >= 64)
+        and _mpp_available()
+    ):
+        # The fused kernel tiles queries internally at 64 rows, below the
+        # requested bound. No dense scores or temporary FP32 K/V are allocated.
+        return _mpp_attention(query, key, value)
     # Convert temporary operands once per layer, not once per query tile. The
     # retained conditioning cache and the solver state remain BF16.
     needs_fp32 = causal or min(block, query.shape[2]) > 8

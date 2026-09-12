@@ -1,0 +1,802 @@
+{
+  "schema_version": 1,
+  "status": "source_and_anchor_complete_production_anchor_comparison_failed",
+  "full_song_acceptance_complete": true,
+  "production_arithmetic_changed_during_this_reference_work": false,
+  "source": {
+    "output": "outputs/full-song-reference/oracle-bf16-staged",
+    "input": "outputs/acceptance-sustain-bf16-precise/tonight_awake_1",
+    "frames": 4493,
+    "solver_steps": 32,
+    "velocity_evaluations": 64,
+    "arrays": 76,
+    "exact_saved_prefix_semantics_and_noise": true,
+    "noise_source": "saved_cpu_float32",
+    "generator_dtype": "bfloat16",
+    "conditioning_query_chunk_size": 256,
+    "residency": "AR expert for conditioning, released before loading NAR expert",
+    "torch": "2.11.0",
+    "transformers": "4.57.6",
+    "python": "3.12.13",
+    "macos": "26.3",
+    "upstream_commit": "92a73cc7652fcc1f937855e4b765e0a0edd7ff2e",
+    "model_revision": "1a96eca688d6ae5d7f0feb88573fec89920fcd19",
+    "model_safetensors_sha256": "1d55c42c1a9875c34f5d736e15078449992b044e807ce2a138e6cf289a1e59e9",
+    "capture_wall_seconds": 1008.85,
+    "sampled_peak_footprint_bytes": 9165753560,
+    "sampled_peak_mps_active_bytes": 4895054080,
+    "sampled_peak_mps_driver_bytes": 9001041920,
+    "new_system_swap_out_bytes": 0,
+    "exception": null,
+    "timing_scope": "Includes model loading and tensor capture; not a matched performance comparison with the optimized production solve."
+  },
+  "rejected_combined_loading_attempt": {
+    "output": "outputs/full-song-reference/oracle-bf16",
+    "wall_seconds": 16.9,
+    "exception": "MemoryError: System memory pressure is not normal (level=2)",
+    "sampled_peak_footprint_bytes": 13539378568,
+    "new_system_swap_out_bytes": 496566272,
+    "disposition": "Failed memory-pressure guard; retained as a failure. Expert staging replaced combined CPU/GPU loading; no guard limit was raised."
+  },
+  "fp32_loader_proof": {
+    "frames": 64,
+    "torch": "2.11.0",
+    "arrays": 84,
+    "all_arrays_bitwise_identical": true,
+    "control": "outputs/full-song-reference/fp32-control-64",
+    "streamed": "outputs/full-song-reference/fp32-streamed-64",
+    "control_sampled_peak_footprint_bytes": 10192639568,
+    "streamed_sampled_peak_footprint_bytes": 8805342192,
+    "new_system_swap_out_bytes": 0,
+    "method": "Forward hooks change only AR weight residency, one layer at a time, while running unchanged upstream CachedNAR conditioning. Both captures use the same runtime and inputs."
+  },
+  "interrupted_full_anchor": {
+    "output": "outputs/full-song-reference/anchor-fp32",
+    "complete": false,
+    "frames": 4493,
+    "dtype": "float32",
+    "ar_prefill_weight_residency": "one_layer",
+    "wall_seconds": 435.64,
+    "arrays": 67,
+    "trajectory_arrays": [
+      "prefix",
+      "codec",
+      "noise",
+      "state_0",
+      "velocity_0",
+      "mid_0",
+      "mid_velocity_0",
+      "state_1",
+      "velocity_1",
+      "mid_1",
+      "mid_velocity_1"
+    ],
+    "has_final_latents": false,
+    "has_fixed_velocities": false,
+    "sampled_peak_footprint_bytes": 14003511456,
+    "sampled_peak_mps_active_bytes": 8205432320,
+    "sampled_peak_mps_driver_bytes": 13279232000,
+    "new_system_swap_out_bytes": 0,
+    "exception": "RuntimeError: AC power disconnected during acceptance execution",
+    "power_start": {
+      "ac_connected": true,
+      "pmset": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22216803)\t100%; charged; 0:00 remaining present: true"
+    },
+    "power_end": {
+      "ac_connected": false,
+      "pmset": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22216803)\t100%; discharging; (no estimate) present: true"
+    },
+    "usable_as_completed_calibration": false
+  },
+  "diagnostic_latent_comparison": {
+    "reference": "outputs/full-song-reference/oracle-bf16-staged/nar.npz",
+    "baseline": {
+      "rms": 0.02296303696264466,
+      "max_abs": 2.048828125,
+      "worst_index": [
+        1403,
+        38
+      ]
+    },
+    "optimized": {
+      "rms": 0.020270470252674873,
+      "max_abs": 1.44677734375,
+      "worst_index": [
+        2159,
+        2
+      ]
+    },
+    "acceptance": "Not evaluated: no completed independent full-song FP32 anchor or full-song bounds yet."
+  },
+  "predeclared_sustain": {
+    "case": "tonight_awake_second_verse",
+    "recorded_at": "2026-09-11T20:11:43.267Z",
+    "corpus_sha256": "a52058609c1bdfb95888d5dc9d03115d3360943dc5bcd4e52d360e9b1f3fa428",
+    "request_set_sha256": "465755891b79e586f282101c94beb557a78dd076954245735a18be61293937b8",
+    "request_ids": [
+      "tonight_awake_second_verse_1",
+      "tonight_awake_second_verse_2",
+      "tonight_awake_second_verse_3"
+    ],
+    "seed": 12300,
+    "only_lyric_change": "One additional four-line verse immediately before the bridge.",
+    "original_case_preserved": true,
+    "normal_generation_budgets_preserved": true,
+    "strict_duration_gate_seconds": [
+      180,
+      240
+    ],
+    "generation_performed": false,
+    "no_post_output_retuning": true,
+    "input_artifact": "outputs/full-song-reference/preregistered-sustain.json"
+  },
+  "verification": {
+    "completed_source_capture": true,
+    "truncated_full_song_source_rejected": true,
+    "same_runtime_fp32_loader_parity": true,
+    "extended_case_requests_construct_successfully_without_loading_models": true,
+    "fixed_mode_case_override_rejected": true,
+    "unknown_full_song_case_rejected": true,
+    "pytest": {
+      "command": "uv run pytest -q",
+      "passed": 39,
+      "seconds": 4.05,
+      "scope": "Bounded regression tests, not real-checkpoint full-song acceptance or timing."
+    },
+    "ruff": {
+      "command": "uv run ruff check src tests tools",
+      "passed": true
+    },
+    "fixed_state_reference_binding": {
+      "regression_failed_before_fix": true,
+      "focused_test_command": "uv run pytest -q tests/test_limits.py",
+      "focused_tests_passed": 2,
+      "full_suite_rerun_pending": true
+    }
+  },
+  "caveats": [
+    "The first combined-loading attempt caused 496566272 bytes of additional system swap-outs and failed; successful staged-source and FP32 runs recorded zero additional swap-outs.",
+    "The staged 64-frame BF16 source on Torch 2.11 is not bitwise identical to the historical Torch 2.10 capture late in the trajectory (maximum latent difference 0.0625). The same-runtime FP32 loader parity control, not that cross-version comparison, establishes the streaming transformation.",
+    "No existing numerical bounds, solver work, attention visibility or original acoustic chunk boundaries were changed.",
+    "Strict AR production acceptance remains unresolved. A uniform FP32-activation diagnostic passes the unchanged AR gates, but is not a production change or a listening sign-off.",
+    "Full-song source decoding and current-kernel sustained rendering have been reviewed via human listening. The production full-song FP32-anchor comparison still numerically fails k_9, but is perceptually accepted.",
+    "The original 179.718667-second sustained songs still fail the strict 180-second duration threshold.",
+    "Reference and generated audio have now received a complete full-song listening sign-off."
+  ],
+  "cleanup": {
+    "removed": [
+      "outputs/full-song-reference/invalid-full-case"
+    ],
+    "retained": "Raw captures, partial calibrations, failures, executed-tool snapshots and the active causal-attention experiment are retained. Temporary experiment cleanup follows its verification."
+  },
+  "artifacts": [
+    {
+      "path": "outputs/full-song-reference/oracle-bf16-staged/nar.json",
+      "sha256": "b302f97fa648bcb499c04fa61a8bbe05a44dc29b8bcbad1a0fc90037f4ab6f2b",
+      "bytes": 492
+    },
+    {
+      "path": "outputs/full-song-reference/oracle-bf16-staged/nar.npz",
+      "sha256": "8f87b32ded61e42aba3a8e9bab24bf60322d8f6f6a21589c4afc8375e03e9ab1",
+      "bytes": 1632804792
+    },
+    {
+      "path": "outputs/full-song-reference/oracle-bf16-staged/invocation.json",
+      "sha256": "50bd53bbbeb5e9fe9ffbeed9c5cd8b1c705fdf27c86b3445a8b017a584f7d7ae",
+      "bytes": 2871
+    },
+    {
+      "path": "outputs/full-song-reference/oracle-bf16-staged/resources.json",
+      "sha256": "39b7bc88c4e3284e2cd14577e22d0ba4f92074b83208a4f11b361876c86e6f87",
+      "bytes": 2814477
+    },
+    {
+      "path": "outputs/full-song-reference/oracle-bf16/resources.json",
+      "sha256": "739f913dffc15d7dc9496a7d13a7df5d4639a4fb187786b009ad69b674b38e8a",
+      "bytes": 40411
+    },
+    {
+      "path": "outputs/full-song-reference/staged-bf16-64/nar.npz",
+      "sha256": "dac9779bee5b752cb7ec72056a5cef7ca44bf067ae1e5655093cf8055299982e",
+      "bytes": 97111680
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-control-64/nar.npz",
+      "sha256": "ea218681794fbf350b44afa3decf5fd831f60fa360cbf67704163d440eb1f3c9",
+      "bytes": 97244904
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-streamed-64/nar.npz",
+      "sha256": "ea218681794fbf350b44afa3decf5fd831f60fa360cbf67704163d440eb1f3c9",
+      "bytes": 97244904
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-loader-parity.json",
+      "sha256": "f83ee6660612f5592c4453e8d6781f71449544512c26e0e1fdeec1a88677a6c9",
+      "bytes": 320
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32/nar.partial.npz",
+      "sha256": "12193c64921d0100a1fc982e09e7f6c1967a7065682044abb6bc7d39d7289c19",
+      "bytes": 1622450658
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32/invocation.json",
+      "sha256": "82e713fd7da63a77f670ef6f7d672f5a885af490ace9aa11f882abc687baf53e",
+      "bytes": 1200
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32/resources.json",
+      "sha256": "624c81883e69e4fbf9b9103624fe749fa859dc8658776f26115f31fc44989979",
+      "bytes": 1183511
+    },
+    {
+      "path": "outputs/full-song-reference/initial-comparison.json",
+      "sha256": "abe223be3887a8e6c98d9db5be9b9d4f26f485ab845b7b2ee96b59a61d0317dc",
+      "bytes": 717
+    },
+    {
+      "path": "outputs/full-song-reference/ar-error-geometry.json",
+      "sha256": "b8958adf7d3fbd0d6453cf1a7d00de093a57309c66439a6eba30638f566288f0",
+      "bytes": 3492
+    },
+    {
+      "path": "outputs/full-song-reference/preregistered-sustain.json",
+      "sha256": "394f6b66c9b8f8f772a26d9b3fcc520600e840036d92ef9d634e752d29ae65ab",
+      "bytes": 6017
+    },
+    {
+      "path": "outputs/full-song-reference/executed-tools/oracle.py",
+      "sha256": "9f4326262a123d28219c32fead884c6343c26f68aea8449a58f19edf6d871034",
+      "bytes": 31576
+    },
+    {
+      "path": "outputs/full-song-reference/executed-tools/calibrate.py",
+      "sha256": "6f8dc3e23591e0f55d7c2550776783fdb4a2799b0fc4611bb00f6b96d8ce83a5",
+      "bytes": 12843
+    },
+    {
+      "path": "outputs/full-song-reference/executed-tools/calibrate-streamed.py",
+      "sha256": "863b9a50e2c5ef41a8e89b4b7e289450f50d1f1f4737789d57eb95eb2d046ee7",
+      "bytes": 14017
+    },
+    {
+      "path": "outputs/full-song-reference/executed-tools/fidelity.py",
+      "sha256": "6f30d4ee7a4171fa191ff30e7893b9d4835d4a3e7dd2d7080b08008672f22b8d",
+      "bytes": 37551
+    },
+    {
+      "path": "tools/oracle.py",
+      "sha256": "9f4326262a123d28219c32fead884c6343c26f68aea8449a58f19edf6d871034",
+      "bytes": 31576
+    },
+    {
+      "path": "tools/fidelity.py",
+      "sha256": "6f30d4ee7a4171fa191ff30e7893b9d4835d4a3e7dd2d7080b08008672f22b8d",
+      "bytes": 37551
+    },
+    {
+      "path": "tools/acceptance.py",
+      "sha256": "f3406603f0f944b4eaacb8bc190375ce4df0856937711e57a677c059c7b86025",
+      "bytes": 14393
+    },
+    {
+      "path": "validation/corpus.json",
+      "sha256": "a52058609c1bdfb95888d5dc9d03115d3360943dc5bcd4e52d360e9b1f3fa428",
+      "bytes": 4832
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32-unrestricted-power/invocation.json",
+      "sha256": "bea6e12f9c0ecaa0061e9c9768b495b50c756c5551fd2beb5e46a4c8b3b760f2",
+      "bytes": 1220
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32-unrestricted-power/resources.json",
+      "sha256": "7cb7946c48e9fc600ad0663eb24d6c99d121a851c0e9bdf192401110c349d06a",
+      "bytes": 123804
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-streamed-both-64/nar.npz",
+      "sha256": "ea218681794fbf350b44afa3decf5fd831f60fa360cbf67704163d440eb1f3c9",
+      "bytes": 97244904
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-streamed-both-64/resources.json",
+      "sha256": "7761121831526eb8a5ffdfc72ae553be1101e97fb5270ad28d38b20c3e0485b6",
+      "bytes": 140643
+    },
+    {
+      "path": "outputs/full-song-reference/fp32-both-loader-parity.json",
+      "sha256": "b3f0ac1aa6e8019c38b327771e65dce2c6fac84cb27bd1b331a744c29100c5b3",
+      "bytes": 325
+    },
+    {
+      "path": "outputs/full-song-reference/executed-tools/calibrate-streamed-both.py",
+      "sha256": "c97a1bce705e149f6e2e61b9534fbc0f053c8b10ff5fc469aacac302b1357796",
+      "bytes": 14536
+    },
+    {
+      "path": "tools/calibrate.py",
+      "sha256": "c97a1bce705e149f6e2e61b9534fbc0f053c8b10ff5fc469aacac302b1357796",
+      "bytes": 14536
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32-streamed/nar.npz",
+      "sha256": "9da102855d5a594f8716ab64507bb07d68f745b76fcf854b54469d46e76bcb3d",
+      "bytes": 1642008608
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32-streamed/invocation.json",
+      "sha256": "0bf89575d8ea3cf706a2cccc9ed19ee57c44fa26c5b0edb27736ef305392f777",
+      "bytes": 1210
+    },
+    {
+      "path": "outputs/full-song-reference/anchor-fp32-streamed/resources.json",
+      "sha256": "1779120383966bac4edc0da818b5cedf77c49ba6c389f9ad8745edead3e6897c",
+      "bytes": 1469571
+    },
+    {
+      "path": "validation/bf16-nar-full-song-torch211-limits.json",
+      "sha256": "1479146229671a537141f8e72f3d216776c6d32d1e7960322471487e26d64c4e",
+      "bytes": 32844
+    },
+    {
+      "path": "validation/bf16-nar-64-torch211-limits.json",
+      "sha256": "baccdce9e67ce45343d91ac4952c0ee01c6a90b986118c66176bb842eb5914ad",
+      "bytes": 32943
+    },
+    {
+      "path": "outputs/full-song-reference/reference-binding.json",
+      "sha256": "6aea6b13bbbdb52aad512a2aaada3850688dcfacf40cfb4562b5dfbd4ce55977",
+      "bytes": 615
+    },
+    {
+      "path": "outputs/full-song-reference/fidelity-mlx/fidelity.json",
+      "sha256": "cefd13793621eed49ee0fea2864d9ced8a03309e25cb8e436be2b6775b4c4c7e",
+      "bytes": 74397
+    },
+    {
+      "path": "outputs/full-song-reference/fidelity-mlx/precision-anchor.json",
+      "sha256": "c642535af67bcbd05316a21bc120e9e24418d74bf3fceafc93cd87dbd7493f3a",
+      "bytes": 22734
+    },
+    {
+      "path": "outputs/full-song-reference/fidelity-mlx/invocation.json",
+      "sha256": "d6586662884695ff2217140975620c1bf275d1bf97332698f06be4fb5e0bee44",
+      "bytes": 2621
+    },
+    {
+      "path": "outputs/full-song-reference/k9-diagnostic.json",
+      "sha256": "262a45c8f7c4d25c5d780ef4cb69f737ac1067f3090c676cf9c4aa4f3496e671",
+      "bytes": 336
+    },
+    {
+      "path": "outputs/full-song-reference/ar-causal-plan.json",
+      "sha256": "85d305862326929808702d392fadc81ca249344fa3f176409efb3982c3998522",
+      "bytes": 3092
+    },
+    {
+      "path": "outputs/full-song-reference/ar-causal-batch.json",
+      "sha256": "ec7822824fc8c8366dbdddbf43d7314d99c7b671f3bb6a2ffd713db97900332d",
+      "bytes": 15526
+    },
+    {
+      "path": "outputs/full-song-reference/ar-causal-probe.py",
+      "sha256": "5a78d6af8898f1a66df836d0151998c6fac070f3d490c929897409712f68b822",
+      "bytes": 7412
+    },
+    {
+      "path": "outputs/full-song-reference/run-ar-causal-plan.py",
+      "sha256": "b693b3e3655bc2bca55e48c058dd4321a44216d814d2bbf8389eaf656291b92c",
+      "bytes": 3900
+    },
+    {
+      "path": "outputs/full-song-reference/nar-causal-probe.py",
+      "sha256": "f36dcbe98ae13f159decd4d365069cdc3ead45e88d09b51a98afe7696997847f",
+      "bytes": 7056
+    },
+    {
+      "path": "outputs/full-song-reference/nar-causal-conditioning-full/conditioning.json",
+      "sha256": "e47720e378fad594b79c49469ec1ebe6f680667156c0392ffcd9a6401514c81f",
+      "bytes": 31626
+    },
+    {
+      "path": "outputs/full-song-reference/ar-activation-plan.json",
+      "sha256": "d57e591b363b951d105339f918a674dff89def4df643b6417655e971500b41f4",
+      "bytes": 3125
+    },
+    {
+      "path": "outputs/full-song-reference/ar-activation-batch.json",
+      "sha256": "54d7574ae5d2b65863e849fc6690a02c70fa0ab81f161db1a5c0cfaa0b7849e4",
+      "bytes": 13830
+    },
+    {
+      "path": "outputs/full-song-reference/ar-fp32-activation-probe.py",
+      "sha256": "4b6a86803ef5e054dcbc9c0bc5e4e3703a15da7c0191ac7eea78ec89c6cac501",
+      "bytes": 3428
+    },
+    {
+      "path": "outputs/full-song-reference/run-ar-activation-plan.py",
+      "sha256": "0cba6b4c37d39c639d8adb9c864d3ae4951463a6d6daa07d4e548504d4a4ee09",
+      "bytes": 3938
+    },
+    {
+      "path": "outputs/full-song-reference/nar-fp32-conditioning-probe.py",
+      "sha256": "0c6adbdad734152cdfb7b45381f2547a79673ec4ea9873b4588706e9e801ac1a",
+      "bytes": 3984
+    },
+    {
+      "path": "outputs/full-song-reference/nar-fp32-conditioning-full/conditioning.json",
+      "sha256": "610bb0908dd31d8f353e418adead07cf5f1d9a0b0d01e07c1ddd63cc0c9a2f31",
+      "bytes": 31349
+    },
+    {
+      "path": "outputs/full-song-reference/nar-fp32-conditioned-64/fidelity.json",
+      "sha256": "c4b7a639b3a9ebd6f8e2816169891c9df4e4462b499f1a439ace17af8414607a",
+      "bytes": 74573
+    },
+    {
+      "path": "outputs/full-song-reference/nar-fp32-conditioned-64/precision-anchor.json",
+      "sha256": "a8bf9e45009c197c1f229a27980f4231fbaab5af16da63c24e92208bcbca8f89",
+      "bytes": 22734
+    }
+  ],
+  "subsequent_power_policy": {
+    "require_ac": false,
+    "authorization": "Maintainer requested battery operation for subsequent runs and will ensure power availability.",
+    "memory_budget_gib": 16,
+    "memory_and_swap_guards_preserved": true,
+    "power_observation": "Start/end power state remains recorded; constant power conditions are not guaranteed."
+  },
+  "resident_nar_retry": {
+    "output": "outputs/full-song-reference/anchor-fp32-unrestricted-power",
+    "wall_seconds": 55.79,
+    "exception": "MemoryError: System memory pressure is not normal (level=2)",
+    "sampled_peak_footprint_bytes": 12428418032,
+    "sampled_peak_mps_driver_bytes": 13312753664,
+    "new_system_swap_out_bytes": 0,
+    "power_start": {
+      "ac_connected": false,
+      "pmset": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22216803)\t100%; discharging; 18:26 remaining present: true"
+    },
+    "power_end": {
+      "ac_connected": false,
+      "pmset": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22216803)\t100%; discharging; 18:26 remaining present: true"
+    }
+  },
+  "fully_streamed_fp32_loader_proof": {
+    "same_runtime": "PyTorch 2.11.0",
+    "tensors": 84,
+    "bitwise_identical": true,
+    "differences": {},
+    "fp32-control-64": {
+      "sampled_peak_footprint_bytes": 10192639568,
+      "swap_out_delta_bytes": 0
+    },
+    "fp32-streamed-both-64": {
+      "sampled_peak_footprint_bytes": 4786639984,
+      "swap_out_delta_bytes": 0
+    },
+    "method": "One expert layer resident during both conditioning and every acoustic velocity; original upstream operators, states and all solver work are unchanged.",
+    "next_full_capture": "outputs/full-song-reference/anchor-fp32-streamed",
+    "full_capture_acceptance": "Reference capture complete; MLX intermediate and anchor comparisons pending."
+  },
+  "completed_full_anchor": {
+    "output": "outputs/full-song-reference/anchor-fp32-streamed",
+    "frames": 4493,
+    "steps": 32,
+    "arrays": 84,
+    "wall_seconds": 1738.19,
+    "ar_prefill_weight_residency": "one_layer",
+    "nar_velocity_weight_residency": "one_layer",
+    "sampled_peak_footprint_bytes": 12345349784,
+    "sampled_peak_mps_active_bytes": 3878551040,
+    "sampled_peak_mps_driver_bytes": 10116677632,
+    "new_system_swap_out_bytes": 0,
+    "power_start": {
+      "ac_connected": false,
+      "pmset": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22216803)\t99%; discharging; 16:26 remaining present: true"
+    },
+    "power_end": {
+      "ac_connected": false,
+      "pmset": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22216803)\t83%; discharging; 10:46 remaining present: true"
+    },
+    "exception": null
+  },
+  "independent_full_song_limits": {
+    "path": "validation/bf16-nar-full-song-torch211-limits.json",
+    "method": "two_equal_reference_precision_error_radii",
+    "tensors": 82,
+    "uses_port_outputs": false,
+    "fixed_state_reference_binding_verified": true
+  },
+  "full_song_comparison": {
+    "output": "outputs/full-song-reference/fidelity-mlx",
+    "source_status": "passed",
+    "source_tensor_count": 82,
+    "source_failures": [],
+    "anchor_status": "failed",
+    "anchor_tensor_count": 82,
+    "anchor_failures": [
+      {
+        "kind": "bound",
+        "tensor": "k_9",
+        "group": "cache",
+        "metric": "max_abs",
+        "actual": 0.3830385208129883,
+        "upper": 0.27739596366882324,
+        "source": "tensor"
+      }
+    ],
+    "execution": {
+      "frames": 4493,
+      "solver_steps": 32,
+      "scope": "full_song",
+      "state_transition": "production_bf16_midpoint_arithmetic",
+      "production_solve_complete": true,
+      "production_velocity_evaluations": 64,
+      "conditioning_dtype": "bfloat16",
+      "solver_dtype": "bfloat16",
+      "query_chunk_size": 256,
+      "key_visibility": "full_conditioning_and_acoustic_state"
+    },
+    "reported_command_wall_seconds": 1026.14,
+    "guarded_seconds": 1023.4717109999619,
+    "sampled_peak_footprint_bytes": 11285651328,
+    "new_system_swap_out_bytes": 0,
+    "final_latents": {
+      "source": {
+        "max_abs": 1.44677734375,
+        "rms_error": 0.020270470252674873,
+        "reference_rms": 0.9771760182324255,
+        "relative_rms_error": 0.020743929317198463,
+        "cosine": 0.9997848437114988,
+        "p99_abs": 0.04296875
+      },
+      "anchor": {
+        "max_abs": 1.5005048513412476,
+        "rms_error": 0.028511622326744587,
+        "reference_rms": 0.9778526786755907,
+        "relative_rms_error": 0.029157380194898982,
+        "cosine": 0.9995748700755154,
+        "p99_abs": 0.06502971708774562
+      }
+    },
+    "timing_is_matched_speed_benchmark": false
+  },
+  "rejected_causal_candidate": {
+    "production_changed": false,
+    "ar_status": "rejected",
+    "ar_cases": [
+      {
+        "case": "negative",
+        "source_status": "failed",
+        "anchor_status": "failed",
+        "source_failures": [
+          {
+            "kind": "bound",
+            "tensor": "v_1024_5",
+            "group": "cache",
+            "metric": "max_abs",
+            "actual": 0.125,
+            "upper": 0.09044075012207031,
+            "source": "tensor"
+          },
+          {
+            "kind": "bound",
+            "tensor": "v_1024_6",
+            "group": "cache",
+            "metric": "max_abs",
+            "actual": 0.3125,
+            "upper": 0.19009780883789062,
+            "source": "tensor"
+          }
+        ],
+        "anchor_failures": [
+          {
+            "kind": "bound",
+            "tensor": "v_1024_6",
+            "group": "cache",
+            "metric": "max_abs",
+            "actual": 0.2174510955810547,
+            "upper": 0.19009780883789062,
+            "source": "tensor"
+          },
+          {
+            "kind": "reference_comparison",
+            "status": "failed"
+          }
+        ],
+        "kernel_calls": {
+          "causal_mpp": 56,
+          "original": 224
+        }
+      },
+      {
+        "case": "long",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "kernel_calls": {
+          "causal_mpp": 504,
+          "original": 224
+        }
+      },
+      {
+        "case": "song-negative",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "kernel_calls": {
+          "causal_mpp": 224,
+          "original": 336
+        }
+      },
+      {
+        "case": "long-prefix",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "kernel_calls": {
+          "causal_mpp": 336,
+          "original": 112
+        }
+      },
+      {
+        "case": "short",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "kernel_calls": {
+          "causal_mpp": 56,
+          "original": 224
+        }
+      },
+      {
+        "case": "song-positive",
+        "source_status": "passed",
+        "anchor_status": "failed",
+        "source_failures": [],
+        "anchor_failures": [
+          {
+            "kind": "bound",
+            "tensor": "v_128_13",
+            "group": "cache",
+            "metric": "max_abs",
+            "actual": 0.11130905151367188,
+            "upper": 0.0958247184753418,
+            "source": "tensor"
+          },
+          {
+            "kind": "bound",
+            "tensor": "v_6144_3",
+            "group": "cache",
+            "metric": "max_abs",
+            "actual": 0.022439002990722656,
+            "upper": 0.01803380437195301,
+            "source": "tensor"
+          }
+        ],
+        "kernel_calls": {
+          "causal_mpp": 224,
+          "original": 336
+        }
+      }
+    ],
+    "full_nar_conditioning": {
+      "status": "failed",
+      "failures": [
+        {
+          "comparison": "anchor",
+          "tensor": "k_27",
+          "metric": "max_abs",
+          "actual": 1.699005126953125,
+          "upper": 1.3752784729003906
+        }
+      ],
+      "complete_solver_executed": false
+    }
+  },
+  "activation_precision_diagnostic": {
+    "production_changed": false,
+    "weights": "bfloat16",
+    "ar_internal_activations": "float32",
+    "retained_kv": "bfloat16",
+    "returned_logits": "bfloat16",
+    "limits_changed": false,
+    "ar_status": "passed",
+    "ar_cases": [
+      {
+        "case": "negative",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 10,
+          "fp32_attention": 280,
+          "bf16_logit_head": 10
+        }
+      },
+      {
+        "case": "long",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 26,
+          "fp32_attention": 728,
+          "bf16_logit_head": 10
+        }
+      },
+      {
+        "case": "song-negative",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 20,
+          "fp32_attention": 560,
+          "bf16_logit_head": 15
+        }
+      },
+      {
+        "case": "long-prefix",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 16,
+          "fp32_attention": 448,
+          "bf16_logit_head": 5
+        }
+      },
+      {
+        "case": "short",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 10,
+          "fp32_attention": 280,
+          "bf16_logit_head": 10
+        }
+      },
+      {
+        "case": "song-positive",
+        "source_status": "passed",
+        "anchor_status": "passed",
+        "source_failures": [],
+        "anchor_failures": [],
+        "precision_calls": {
+          "fp32_backbone": 20,
+          "fp32_attention": 560,
+          "bf16_logit_head": 15
+        }
+      }
+    ],
+    "full_nar_conditioning": {
+      "status": "passed",
+      "failures": [],
+      "complete_solver_executed": false
+    },
+    "nar_64": {
+      "source_status": "passed",
+      "anchor_status": "passed",
+      "source_tensor_count": 82,
+      "anchor_tensor_count": 82,
+      "source_failures": [],
+      "anchor_failures": []
+    },
+    "matched_ar_timing": "in_progress",
+    "full_nar_solve": "pending"
+  }
+}

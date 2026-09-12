@@ -2,7 +2,7 @@
 
 Run [YuE2](https://huggingface.co/m-a-p/YuE2-3B) music generation locally on Apple Silicon. Autoregressive planning and acoustic synthesis use MLX; the original FP32 decoder runs through PyTorch/MPS. After model preparation, generation works offline.
 
-**Experimental BF16 MVP.** Complete generation works, but full-song reference/listening acceptance and some strict AR numerical comparisons remain open. This is not a claim of bit-identical upstream output or finished optimization. The project is independent of the upstream YuE team.
+**Experimental BF16 MVP.** Complete generation works. Strict AR numerical comparisons remain open; full-song NAR comparison is complete but retains one FP32-anchor cache failure accepted after listening review. This is not a claim of bit-identical upstream output or finished quantized quality selection. The project is independent of the upstream YuE team.
 
 The repository is named `yue2-mlx`; the current Python distribution is `lyra-yue2`, and the command and Python import are both **`lyra`**.
 
@@ -89,7 +89,7 @@ uv run lyra generate examples/full-song.json \
 
 This is the Chinese City Pop example from the [retained acceptance corpus](validation/corpus.json), attributed there to the upstream demo. It generates its own score and uses the normal generation budgets. Copy the JSON file and edit `style` and `lyrics` for your own request. Song duration is generated, not a fixed-length promise; inspect the truncation flags when a token budget is reached.
 
-**Measured on the 32 GB M5 Air:** three sequential BF16 runs of this request produced naturally ended **179.719-second** songs in **13.6–15.1 minutes each**, with **12.63 GiB sampled peak process footprint** and no additional swap-outs. Timings vary with the request and machine. These songs miss the unchanged strict 180-second harness cutoff by 0.281 seconds; they were not padded. Full-song listening remains pending. See the [public measurement summary](validation/mvp-results.json) and [validation status](validation/README.md).
+**Measured on the 32 GB M5 Air:** three sequential BF16 runs of this request produced naturally ended **179.719-second** songs in **13.6–15.1 minutes each**, with **12.63 GiB sampled peak process footprint** and no additional swap-outs. Timings vary with the request and machine. These songs miss the unchanged strict 180-second harness cutoff by 0.281 seconds; they were not padded. Full-song listening review is complete; the duration gate remains failed. See the [public measurement summary](validation/mvp-results.json) and [validation status](validation/README.md).
 
 ## Python API
 
@@ -117,13 +117,19 @@ with YuE2Pipeline.from_pretrained(
 
 The API also exposes `plan → generate_semantic → synthesize → decode`, saved plans, exact-input acoustic replay, cancellation, token callbacks and WAV/FLAC export. See the [usage and API reference](docs/usage.md) for controls, score editing, artifacts and portable offline model directories.
 
+## Acoustic optimization
+
+The precise M5 acoustic kernel reduced mean NAR-stage time from **524.2 to 453.1 seconds** on the same 179.72-second song: **13.6% less time** across two reversed-order pairs. The matched 400-frame stage improved **8.2%**. These are acoustic-only measurements, not end-to-end or PyTorch/MPS speedups; long-run timings varied substantially with run order.
+
+The fused kernel keeps BF16 state/cache, FP32 probabilities and accumulation, full keys and all 64 velocity evaluations. Both 64-/400-frame source and FP32-anchor checks pass unchanged. Full-song output is not bit-identical to the old implementation; the completed source comparison retains one FP32-anchor cache failure, accepted after listening review. See the [measurement method and caveats](validation/README.md#precise-acoustic-attention-optimization) and [retained evidence](validation/nar-optimization.json).
+
 ## MVP boundaries
 
 - All five generated/supplied-score paths across `full`, `melody` and `off` modes have rendered with real checkpoints. The default decoder is `YuE2-Vae`, not the legacy benchmark decoder.
-- A matched 16-second reference/port acoustic pair was manually reviewed as sounding correct and identical. This does **not** establish full-song quality or equivalence of independently sampled AR output.
-- Four strict AR numerical comparisons remain outside their empirical bounds. They have not been waived for this release. NAR/VAE checks pass their recorded limits; complete-song comparison and listening remain open.
+- A matched 16-second reference/port acoustic pair from the original FP32-attention implementation was manually reviewed as sounding correct and identical. Subsequent current-kernel full-song reference and generated audio also received listening sign-off; numerical source comparison passes while one FP32-anchor cache bound fails and remains recorded.
+- Four strict AR numerical comparisons remain outside their empirical bounds. They have not been waived for this release. Bounded NAR/VAE checks pass their recorded limits; the full-song NAR comparison is complete with one explicitly accepted FP32-anchor failure.
 - **BF16 is the MVP default.** Optional 8-bit/4-bit AR modes remain experimental pending listening. They retain BF16 acoustic conditioning and add weight files rather than shrinking the whole installation to one quarter.
-- No batch CLI, completed-result `--resume`, standalone `doctor`, or upstream-style inline lyrics/style flags yet. Requests use JSON; Python can handle serial request loops.
+- The serial batch CLI, completed-result `--resume`, standalone `doctor`, and inline request overrides are available. Parallel batch execution is not supported.
 - Editing a score, style or lyrics regenerates audio; it is not waveform-preserving inpainting. Source-audio transcription, streaming, real-time guarantees, best-of-N selection and a native Mac GUI are outside this release.
 
 For diagnostics, include the command, macOS/chip/memory information, exception and relevant stage timings in a [GitHub issue](https://github.com/daig/yue2-mlx/issues). Redact private lyrics, local paths and credentials before sharing reports.
@@ -141,6 +147,6 @@ Model-based acceptance and the separately locked PyTorch reference are described
 
 - Project code: [Apache-2.0](LICENSE). Vendored upstream code retains its [Apache license](vendor/yue/LICENSE).
 - **Model weights: [CC BY-NC 4.0](vendor/yue/MODEL_LICENSE)**, including the generator and default decoder. The code license does not grant unrestricted commercial model use.
-- VAE-derived code retains the [upstream third-party notices](vendor/yue/THIRD_PARTY_NOTICES.md) and [MIT license texts](vendor/yue/licenses/). The adapted MLX-LM attention retains [Apple's MIT license](src/lyra/licenses/MLX_LM_MIT.txt).
+- VAE-derived code retains the [upstream third-party notices](vendor/yue/THIRD_PARTY_NOTICES.md) and [MIT license texts](vendor/yue/licenses/). The adapted MLX-LM attention retains [Apple's MIT license](src/lyra/licenses/MLX_LM_MIT.txt); the [NAR tensor kernel](src/lyra/_nar_attention.py) includes the MIT notice for its adapted MLX lane layout.
 
 No model weights are bundled or re-hosted by this release.

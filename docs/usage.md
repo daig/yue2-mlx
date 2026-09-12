@@ -33,9 +33,25 @@ If the portable directory was exported, it contains both model paths:
 uv run lyra generate request.json --model models/offline --offline --output outputs/first-song
 ```
 
-Output directories must be absent or empty; Lyra never mixes or silently overwrites recordings. `--quiet` disables display progress without changing RNG or generation. `--require-ac` rejects a run that starts off AC power or loses AC power. CLI runs also write sampled resource evidence beside the output as `<output>.resources.jsonl` and `<output>.resources.json`.
+Output directories must be absent or empty; Lyra never mixes or silently overwrites recordings. Use `--resume` to reuse a matching completed result or retry a matching interrupted/failed output. `--quiet` disables display progress without changing RNG or generation. `--require-ac` rejects a run that starts off AC power or loses AC power. CLI runs also write sampled resource evidence beside the output as `<output>.resources.jsonl` and `<output>.resources.json`.
 
-A supplied score is read as UTF-8 while preserving its bytes through tokenization. `--abc` and `--mode` override the corresponding request fields:
+### Inline request overrides
+
+The request path is optional when `--style` and `--lyrics` (or `--lyrics-file`) are supplied. `--id`, `--seed`, `--cfg-scale`, `--mode`, and `--abc`/`--abc-file` override matching JSON fields. A JSON request may use relative `lyrics_path` and `abc_path` values; they resolve relative to that request file.
+
+```bash
+uv run lyra generate \
+  --style "English, warm piano pop, expressive vocal, 88 BPM" \
+  --lyrics-file lyrics.txt \
+  --abc-file validation/score.abc \
+  --mode full --seed 831001 \
+  --model models/converted --vae "$LYRA_VAE" --offline \
+  --output outputs/inline-song
+```
+
+`--resume` is identity-checked against the normalized request, effective generation configuration and model identities. A changed request or configuration requires a new output directory.
+
+A supplied score is read as UTF-8 while preserving its bytes through tokenization. `--abc`/`--abc-file` and `--mode` override the corresponding request fields:
 
 ```bash
 uv run lyra generate request.json \
@@ -56,6 +72,27 @@ The five valid paths are:
 | `melody` | generated | Generate melody-plan ABC; accompaniment remains free |
 | `melody` | supplied | Use exact supplied melody ABC |
 | `off` | none | Generate semantic music directly; supplied ABC is invalid |
+
+
+### Serial batches and diagnostics
+
+`batch` reads one JSON request object per nonempty JSONL line. Every row requires a unique, single-component `id`; malformed rows are recorded as failures without creating a song directory. Batch execution is deliberately serial (`--concurrency 1` is the only accepted value) because one process-wide GPU workload is allowed.
+
+```bash
+uv run lyra batch --input requests.jsonl \
+  --model models/converted --vae "$LYRA_VAE" --offline \
+  --output outputs/batch
+```
+
+The batch receipt is `outputs/batch/batch.json`. Add `--resume` to identity-check and reuse completed per-song results, or retry matching failed/interrupted rows.
+
+`doctor` reports dependency versions, OS/Python/architecture support, Metal backends and unsafe MPS environment flags without downloading models. Add `--verify-hashes --model ... --vae ...` to verify local conversion and decoder identities; its exit status is nonzero when the environment is not ready.
+
+```bash
+uv run lyra doctor
+uv run lyra doctor --verify-hashes \
+  --model models/converted --vae "$LYRA_VAE" --precision bf16
+```
 
 ## Requests and generation controls
 
@@ -229,7 +266,7 @@ One pipeline may retain weights between serial requests, but concurrent calls on
 
 - **AR:** MLX executes only the required Qwen3-compatible expert path with the pinned tokenizer, exact prompt/special-token layout, phase-local native-ID output projections, upstream minimum/end/repetition/top-k/top-p/CFG behavior, device-local sampling, absolute cache/RoPE positions, and 1024-token prefill chunks. BF16 mode keeps weights and caches in BF16. Each AR phase creates its own request-local MLX key from the full 63-bit seed and never mutates global MLX RNG state.
 - **NAR:** MLX preserves BF16 conditioning and solver arithmetic, two zero boundary latents, local learned latent positions, globally offset RoPE, the source timestep shift, and midpoint updates. The original chunk capacity is `min((24576 - len(prefix) - 3) // 2, 24576)` semantic frames. Each chunk prefills causal conditioning exactly once, then uses the original prefix plus only its local codec slice and `MUSIC_END`; earlier codec chunks are not accumulated. The CPU FP32 noise tensor is drawn once for the whole song with a request-local Torch generator, then sliced at those original cuts.
-- **Attention:** the default NAR query tile is 256 positions, but every query still sees the full conditioning and acoustic key set. Query tiling is memory geometry, not local attention or streaming. Full attention uses temporary FP32 operands with MLX TF32 disabled, then rounds output to BF16; the short unmasked vector kernel already has FP32 opmath. Retained weights, KV and solver state stay BF16. Quantized AR generation caches are discarded before BF16 NAR conditioning.
+- **Attention:** `query_chunk_size=256` is the default query memory bound; every query still sees the full conditioning and acoustic key set. On the validated M5 runtime, noncausal BF16 acoustic attention uses a fused 64-query/16-key Metal kernel when the requested bound permits it. It reads BF16 Q/K/V directly, keeps softmax probabilities and matrix accumulators in FP32, and rounds only the result to BF16. It does not allocate a dense score matrix or expanded FP32 K/V buffers. Causal conditioning, smaller query bounds and unsupported devices/shapes retain the native precise paths; the short unmasked vector kernel already has FP32 opmath. MLX TF32 remains disabled. Query tiling is not local attention, streaming or a change to song chunks. Retained weights, KV and solver state stay BF16; quantized AR generation caches are discarded before BF16 NAR conditioning.
 - **VAE:** the default `YuE2-Vae` decoder is the original decoder-only FP32 PyTorch implementation on MPS. Default tiling is 256 latent-frame cores with a 16-frame halo and exact crop; there are no crossfades, shortened right context, or output padding. For `T` latent frames, output is 48 kHz stereo with `1920*T - 64` samples per channel. An alternate decoder must be passed explicitly; the benchmark `YuE2-Vae-legacy` is never silently substituted.
 
 The default guard is a **sampled 16 GiB whole-process budget**, not a promise that framework counters sum to process use. At that budget it configures an 11 GiB **advisory** MLX limit, a 128 MiB MLX cache limit, and a 15 GiB **hard combined-Metal limit enforced when MPS allocates**. PyTorch's MPS allocator counts other Metal allocations, including MLX buffers; this is not a separate decoder allowance. Its driver-memory counter likewise overlaps MLX usage.

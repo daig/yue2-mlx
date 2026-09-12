@@ -98,7 +98,12 @@ def _invocation(args):
             "memory_budget_gib": args.memory_budget_gib,
             "ar_prefill_chunk_size": args.prefill_chunk_size if args.stage == "ar" else None,
             "selected_ar_lengths": args.lengths if args.stage == "ar" else None,
-            "max_nar_frames": MAX_NAR_FRAMES if args.stage == "nar" else None,
+            "max_nar_frames": (
+                MAX_NAR_FRAMES if args.stage == "nar" and not args.full_song else None
+            ),
+            "nar_scope": (
+                "full_song" if args.full_song else "bounded_fixture"
+            ) if args.stage == "nar" else None,
             "nar_solver_steps": SOLVER_STEPS if args.stage == "nar" else None,
             "nar_query_chunk_size": (
                 args.query_chunk_size if args.stage == "nar" else None
@@ -257,6 +262,8 @@ def compare_nar(args, guard, persist):
     metadata = json.loads(metadata_path.read_text())
     if metadata.get("steps") != SOLVER_STEPS:
         raise ValueError(f"NAR fidelity requires the original {SOLVER_STEPS}-step midpoint oracle")
+    if args.full_song and metadata.get("scope") != "full_song":
+        raise ValueError("Full-song fidelity requires a complete full-song source capture")
     guard.check()
     ar = load_ar(args.model, precision="bf16")
     model = load_nar(args.model, ar)
@@ -269,8 +276,11 @@ def compare_nar(args, guard, persist):
         with np.load(args.oracle / "nar.npz", allow_pickle=False) as reference:
             codec = reference["codec"].tolist()
             prefix = reference["prefix"].tolist()
-            if not 1 <= len(codec) <= MAX_NAR_FRAMES:
-                raise ValueError(f"NAR fidelity oracle must contain 1..{MAX_NAR_FRAMES} frames")
+            if not codec or (not args.full_song and len(codec) > MAX_NAR_FRAMES):
+                raise ValueError(
+                    f"Bounded NAR fidelity requires 1..{MAX_NAR_FRAMES} frames; "
+                    "use --full-song for an explicit full-song source capture"
+                )
             if metadata.get("frames") != len(codec):
                 raise ValueError("NAR oracle metadata frame count disagrees with nar.npz")
             from yue2.protocol import CODEC_OFFSET, MUSIC_END
@@ -448,6 +458,7 @@ def compare_nar(args, guard, persist):
             return report, {
                 "frames": len(codec),
                 "solver_steps": SOLVER_STEPS,
+                "scope": "full_song" if args.full_song else "bounded_fixture",
                 "state_transition": "production_bf16_midpoint_arithmetic",
                 "production_solve_complete": True,
                 "production_velocity_evaluations": production_evaluations,
@@ -758,11 +769,17 @@ def main():
     parser.add_argument("--lengths", type=int, nargs="+")
     parser.add_argument("--prefill-chunk-size", type=int, default=PREFILL_CHUNK_SIZE)
     parser.add_argument("--query-chunk-size", type=int, default=NAR_QUERY_CHUNK_SIZE)
+    parser.add_argument(
+        "--full-song", action="store_true",
+        help="NAR only: validate an explicit full-song source capture without shortening it",
+    )
     parser.add_argument("--memory-budget-gib", type=float, default=16)
     parser.add_argument("--require-ac", action="store_true")
     args = parser.parse_args()
     if args.stage != "ar" and args.precision != "bf16":
         parser.error("--precision selects AR weights; NAR is BF16 and VAE is FP32")
+    if args.full_song and args.stage != "nar":
+        parser.error("--full-song is only valid for NAR fidelity")
     precision = "float32" if args.stage == "vae" else args.precision
 
     if args.stage == "ar" and args.prefill_chunk_size < 1:

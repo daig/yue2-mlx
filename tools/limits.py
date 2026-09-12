@@ -21,6 +21,7 @@ from yue2.storage import sha256_file, write_json
 def derive(stage, reference_dir, calibration_dir):
     reference_path = reference_dir / f"{stage}.npz"
     calibration_path = calibration_dir / f"{stage}.npz"
+    reference_hash = sha256_file(reference_path)
     limits, radii = {"tensors": {}}, {}
     with np.load(reference_path, allow_pickle=False) as reference, np.load(
         calibration_path, allow_pickle=False
@@ -33,9 +34,12 @@ def derive(stage, reference_dir, calibration_dir):
             limits["audio"] = {key: 2 * values[key] for key in ("rms_error", "max_abs")}
         else:
             expected_identity = json.loads((reference_dir / f"{stage}.json").read_text())["model"]
-            captured_identity = json.loads((calibration_dir / "invocation.json").read_text())["weights"]
+            invocation = json.loads((calibration_dir / "invocation.json").read_text())
+            captured_identity = invocation["weights"]
             if expected_identity != captured_identity:
                 raise ValueError("BF16 and FP32 captures must use identical checkpoint content")
+            if stage == "nar" and invocation.get("reference_sha256") != reference_hash:
+                raise ValueError("FP32 fixed-state calibration belongs to another BF16 reference")
             for name in anchor.files:
                 if name.startswith(("ids_", "positions_")) or name in {"prefix", "codec", "noise"}:
                     if (
@@ -61,7 +65,7 @@ def derive(stage, reference_dir, calibration_dir):
         stage: limits,
         "calibration": {
             "method": "two_equal_reference_precision_error_radii",
-            "reference_npz_sha256": sha256_file(reference_path),
+            "reference_npz_sha256": reference_hash,
             "anchor_npz_sha256": sha256_file(calibration_path),
             "anchor_invocation_sha256": (
                 sha256_file(calibration_dir / "invocation.json")

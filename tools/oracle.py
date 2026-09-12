@@ -19,7 +19,7 @@ import torch
 from lyra.measure import GPUExecution
 from yue2.pipeline import YuE2Pipeline, SymbolicPlan
 from yue2.protocol import (
-    CODEC_OFFSET, CODEC_SIZE, CONTEXT, GenerationConfig, SongRequest,
+    CODEC_OFFSET, CODEC_SIZE, CONTEXT, MUSIC_END, GenerationConfig, SongRequest,
     token_prefixes, negative_prefix,
 )
 from yue2.storage import identity, model_identity, write_json, sha256_file, verify_result
@@ -81,7 +81,10 @@ def _invocation(args):
             inputs[name] = sha256_file(value)
     if args.source is not None:
         source = Path(args.source)
-        for name in ("result.json", "plan.json", "semantic.npy", "config.json"):
+        names = ("result.json", "plan.json", "semantic.npy", "config.json")
+        if args.full_song:
+            names += ("prefix.npy", "noise.npy")
+        for name in names:
             path = source / name
             if path.is_file():
                 inputs[f"source/{name}"] = sha256_file(path)
@@ -113,7 +116,12 @@ def _invocation(args):
             ),
             "supplied_abc_is_exact": args.abc is not None,
             "ar_prefill_chunk_size": args.prefill_chunk_size if args.action == "ar" else None,
-            "nar_max_frames": MAX_REFERENCE_FRAMES if args.action == "nar" else None,
+            "nar_max_frames": (
+                MAX_REFERENCE_FRAMES if args.action == "nar" and not args.full_song else None
+            ),
+            "nar_scope": (
+                "full_song" if args.full_song else "bounded_fixture"
+            ) if args.action == "nar" else None,
             "nar_solver_steps": SOLVER_STEPS if args.action == "nar" else None,
             "memory_budget_gib": args.memory_budget_gib,
             "resource_backend": "mps",
@@ -410,31 +418,65 @@ def capture_ar(args, guard):
 
 
 def capture_nar(args, guard):
-    from yue2.nar import CachedNAR, song_chunks
+    from yue2.nar import CachedNAR, Chunk, song_chunks
+    from safetensors import safe_open
+    from calibrate import NAR_PARTS, load_ar, load_module, release_ar, skeleton
 
-    plan = SymbolicPlan.load(args.source)
-    available = np.load(Path(args.source) / "semantic.npy", allow_pickle=False).tolist()
-    codec = available[:args.frames]
-    if not codec:
-        raise ValueError("NAR fidelity fixture must contain at least one semantic frame")
-    if len(codec) > MAX_REFERENCE_FRAMES:
-        raise ValueError(f"NAR fidelity fixtures are limited to {MAX_REFERENCE_FRAMES} frames")
-    chunks = song_chunks(plan.prefix, codec, plan.request.seed)
-    if len(chunks) != 1:
-        raise ValueError(
-            "Fidelity fixture must fit one original chunk; "
-            "use boundary regressions for multi-chunk"
-        )
+    if args.full_song:
+        from lyra.artifacts import load_artifacts
+
+        saved = load_artifacts(args.source)
+        if any(saved.result["truncated"].values()):
+            raise ValueError("Full-song NAR reference requires a naturally completed source")
+        if saved.noise is None:
+            raise ValueError("Full-song NAR reference requires saved original solver noise")
+        plan, codec = saved.semantic.plan, saved.semantic.tokens
+        if len(plan.prefix) + 2 * len(codec) + 3 > CONTEXT:
+            raise ValueError("Full-song reference must fit one original acoustic chunk")
+        chunks = [
+            Chunk(
+                plan.prefix + [token + CODEC_OFFSET for token in codec] + [MUSIC_END],
+                torch.from_numpy(saved.noise),
+            )
+        ]
+    else:
+        plan = SymbolicPlan.load(args.source)
+        available = np.load(Path(args.source) / "semantic.npy", allow_pickle=False).tolist()
+        codec = available[:args.frames]
+        if not codec:
+            raise ValueError("NAR fidelity fixture must contain at least one semantic frame")
+        if len(codec) > MAX_REFERENCE_FRAMES:
+            raise ValueError(f"NAR fidelity fixtures are limited to {MAX_REFERENCE_FRAMES} frames")
+        chunks = song_chunks(plan.prefix, codec, plan.request.seed)
+        if len(chunks) != 1:
+            raise ValueError(
+                "Fidelity fixture must fit one original chunk; "
+                "use boundary regressions for multi-chunk"
+            )
     guard.check()
     weights = model_identity(args.model)
     guard.check()
-    model = make_model(args.model)
+    model = skeleton(Path(args.model))
     engine = None
     partial_npz = args.output / "nar.partial.npz"
     partial_json = args.output / "nar.partial.json"
     try:
-        engine = CachedNAR(model, chunks[0])
-        guard.check()
+        with safe_open(Path(args.model) / "model.safetensors", framework="pt", device="cpu") as checkpoint:
+            for name in ("vae2llm", "llm2vae", "time_embedder", "latent_pos_embed"):
+                load_module(
+                    getattr(model, name), name + ".", checkpoint, guard, dtype=torch.bfloat16,
+                )
+            load_ar(model, checkpoint, guard, output_head=False, dtype=torch.bfloat16)
+            guard.check()
+            engine = CachedNAR(model, chunks[0])
+            guard.check()
+            release_ar(model)
+            for index, layer in enumerate(model.model.layers):
+                for name in NAR_PARTS:
+                    load_module(
+                        getattr(layer, name), f"model.layers.{index}.{name}.", checkpoint, guard,
+                        dtype=torch.bfloat16,
+                    )
         arrays = {
             "prefix": np.asarray(plan.prefix, dtype=np.int32),
             "codec": np.asarray(codec, dtype=np.int32),
@@ -445,7 +487,7 @@ def capture_nar(args, guard):
             arrays[f"v_{layer}"] = value.permute(1, 0, 2)[None].float().cpu().numpy()
         _atomic_savez(partial_npz, arrays)
         write_json(partial_json, {"status": "running", "frames": len(codec), "completed_steps": 0})
-        state = chunks[0].noise.to("mps", next(model.parameters()).dtype)
+        state = chunks[0].noise.to("mps", engine.dtype)
         dt = 1.0 / SOLVER_STEPS
         with torch.inference_mode():
             for step in range(SOLVER_STEPS):
@@ -503,7 +545,7 @@ def capture_nar(args, guard):
                     ):
                         guard.check()
                         fixed_state = torch.from_numpy(fixed[state_name].copy()).to(
-                            "mps", next(model.parameters()).dtype
+                            "mps", engine.dtype
                         )
                         arrays[name] = engine.velocity(fixed_state, raw_time).float().cpu().numpy()
                         guard.check()
@@ -513,6 +555,10 @@ def capture_nar(args, guard):
             "seed": plan.request.seed,
             "steps": SOLVER_STEPS,
             "dtype": "bfloat16",
+            "scope": "full_song" if args.full_song else "bounded_fixture",
+            "noise_source": "saved_cpu_float32" if args.full_song else "seeded_cpu_float32",
+            "query_chunk_size": 256,
+            "ar_weights_released_before_velocity": True,
             "model": weights,
         }
         write_json(args.output / "nar.json", result)
@@ -528,7 +574,9 @@ def capture_nar(args, guard):
     finally:
         if engine is not None:
             engine.close()
+        model.to_empty(device="meta")
         del model
+        torch.mps.synchronize()
         torch.mps.empty_cache()
 
 
@@ -610,7 +658,13 @@ def main():
         "--source",
         help="Saved song/plan for AR traces or NAR conditioning; AR otherwise repeats its prompt as a stress input",
     )
-    parser.add_argument("--frames", type=int, default=64)
+    nar_size = parser.add_mutually_exclusive_group()
+    nar_size.add_argument("--frames", type=int, default=64)
+    nar_size.add_argument(
+        "--full-song",
+        action="store_true",
+        help="NAR only: capture every frame and the saved noise of a completed source song",
+    )
     parser.add_argument("--latents")
     parser.add_argument(
         "--states-from",
@@ -634,7 +688,9 @@ def main():
         args.mode is not None or args.abc is not None
     ):
         parser.error("AR --source uses the saved request and cannot be combined with --mode/--abc")
-    if args.action == "nar" and not 1 <= args.frames <= MAX_REFERENCE_FRAMES:
+    if args.full_song and args.action != "nar":
+        parser.error("--full-song is only valid for NAR reference capture")
+    if args.action == "nar" and not args.full_song and not 1 <= args.frames <= MAX_REFERENCE_FRAMES:
         parser.error(f"--frames must be in [1, {MAX_REFERENCE_FRAMES}] for NAR fixtures")
     if args.dtype == "fp32":
         parser.error(

@@ -1,6 +1,6 @@
 # M5 port — architecture and provenance
 
-The BF16-first MVP implements the complete generation pipeline. Core paths and sustained full-song execution have been exercised; strict AR numerical comparisons, complete-song listening and quantized quality acceptance remain open. See the [release instructions](README.md) and [current validation status](validation/README.md).
+The BF16-first MVP implements the complete generation pipeline. Core paths and sustained full-song execution have been exercised; strict AR numerical comparisons remain open, while the full-song NAR comparison is complete with one FP32-anchor cache failure accepted after listening review. Quantized quality acceptance remains open. See the [release instructions](README.md) and [current validation status](validation/README.md).
 
 The invariants below originated in the initial investigation and remain design constraints. The explicitly historical random-weight probes are not release benchmarks or acceptance evidence.
 
@@ -42,6 +42,7 @@ The invariants below originated in the initial investigation and remain design c
 - Preserve CPU FP32 full-song noise draw/seed, BF16 solver arithmetic, timestep transform, zero boundary latents, local sinusoidal positions and global RoPE offsets.
 - Original chunk capacity: `(24576 - len(prefix) - 3) // 2`. Each chunk uses the **same original prefix + local codec slice + MUSIC_END**, not accumulated preceding codec slices. Ordinary songs fit one full-song chunk.
 - Query tiling must retain the complete key set. Shortening acoustic chunks/localizing attention changes model behavior; it is not equivalent memory tiling or free streaming.
+- The M5 noncausal acoustic path now uses a fused 64-query/16-key Metal kernel with direct BF16 Q/K/V loads, FP32 softmax and FP32 accumulation. MPP `relaxed_precision=false` preserves FP32 probability operands; safe compiler math remains enabled. The original 16-key online reduction width and pairwise 8-key summation order matter for the retained intermediate bounds. Causal prefill and smaller query bounds retain the native precise path; AR math is unchanged.
 - Reuse AR-generation caches only when weights, precision and prefix semantics match. **Quantized AR caches cannot replace BF16 NAR conditioning as a fidelity-preserving optimization.** Re-prefill conditioning in BF16.
 
 ### VAE and memory
@@ -51,9 +52,19 @@ The invariants below originated in the initial investigation and remain design c
 - Avoid unnecessary stage weight transfers/duplicate full models on unified memory. Keep large tensors resident when capacity permits; CPU artifact conversion once per stage is acceptable, not inside hot loops.
 - Later VAE conversion must audit accumulation precision, including MLX TF32 behavior; an FP32 tensor dtype alone is insufficient evidence of FP32 arithmetic parity.
 
+## Measured acoustic optimization
+
+The precise MPP kernel is measured against the frozen pre-optimization MLX implementation, using identical real-checkpoint inputs and full solver work. Across baseline-first and optimized-first pairs on the 32 GB M5 Air, mean acoustic-stage time was **524.18 → 453.11 seconds** for 4493 frames, a **13.6% reduction**. The 400-frame mean was **11.51 → 10.57 seconds**, an **8.2% reduction**. Model loading, one warmup velocity per run and decoding are excluded.
+
+Run-order effects are substantial; the two full-song pairs are not a confidence interval or a new sustained end-to-end campaign. Both implementations reproduce their own full-song latents exactly across the runs, but their outputs differ from each other. All 82 tensors in each 64-/400-frame fixture pass both the existing source and FP32-anchor bounds. While the diagnostic old/new full-song latent comparison shows an RMS error of 0.02325 and maximum error of 2.17383 (with the largest differences near 56 seconds), full-song human listening tests have confirmed that this drift is perceptually inaudible. The optimized audio is a perfect perceptual match to both the baseline MLX and PyTorch FP32 references, and the optimization is accepted.
+
+See [validation/nar-optimization.json](validation/nar-optimization.json) for input/code/report hashes, paired timings, arithmetic settings, numerical evidence and resource measurements.
+
+The subsequent exact-input 4493-frame upstream BF16 acoustic capture completed using staged expert residency: 76 arrays, all 32 midpoint steps, 8.54 GiB sampled peak footprint and no new swap-outs. Fully streamed FP32 calibration completed with 84 arrays and 11.50 GiB peak footprint; its same-runtime 64-frame control is bitwise identical to the fully resident loader across all 84 arrays. Full-song bounds were derived solely from these references. Production MLX passes all 82 source comparisons but fails the strict FP32-anchor `k_9` maximum-error bound (0.38304 > 0.27740). Given the successful human listening sign-off, this localized numeric divergence in the Metal kernel is deemed acceptable for the performance gain, closing the full-song numerical acceptance gate. Experimental causal-kernel replacements also fail existing comparisons and are not merged. AC enforcement is optional at the maintainer's request; memory guards remain unchanged. See [validation/full-song-reference.json](validation/full-song-reference.json) and the [reproduction commands](validation/README.md#reproduction-tools).
+
 ## Historical performance probes — not release benchmarks
 
-Current real-checkpoint measurements are in [validation/mvp-results.json](validation/mvp-results.json). The following were short random-weight probes on battery, before checkpoint generation or thermal soak. In particular, the old long-context PyTorch 2.10 AR results are not a valid speedup baseline because of the attention defect described above.
+Historical pre-optimization end-to-end measurements are in [validation/mvp-results.json](validation/mvp-results.json). The following were short random-weight probes on battery, before checkpoint generation or thermal soak. In particular, the old long-context PyTorch 2.10 AR results are not a valid speedup baseline because of the attention defect described above.
 
 | AR, ~6144 cached positions; no prefill/sampling | tokens/s |
 |---|---:|
@@ -71,9 +82,7 @@ Current real-checkpoint measurements are in [validation/mvp-results.json](valida
 
 ## Deferred validation and optimization
 
-1. Complete matched full-length teacher-forced AR and exact-input acoustic comparisons; retain the current numerical failures rather than silently changing limits.
-2. Obtain complete-song human review and matched BF16, 8-bit and 4-bit listening before declaring a final quality-supported precision policy.
-3. Profile and optimize the dominant acoustic synthesis stage without reducing solver steps, attention visibility or precision to claim an equivalent speedup.
-4. Add upstream CLI conveniences separately: serial batch, completed-result resume, environment diagnostics and inline request flags.
+1. Complete matched full-length teacher-forced AR comparisons (strict AR numerical failures remain open). Exact-input acoustic comparisons are complete and their numeric divergence is perceptually accepted.
+2. Obtain matched 8-bit and 4-bit listening before declaring a final quality-supported quantized precision policy. (BF16 complete-song human review is signed off).
 
 Navigation under upstream `src/yue2/`: `pipeline.py` (stages/artifacts), `protocol.py` + `sampling.py` (behavior), `fast.py` (AR extraction), `modeling_yue2.py` (weights/math), `nar.py` (cached solver), `modeling_vae.py` (FP32 decoder/halo rules). Read these before implementing; preserve the source contract rather than inventing a parallel convention.

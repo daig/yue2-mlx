@@ -1,13 +1,14 @@
 """Capture FP32 numerical anchors without a resident FP32 combined generator.
 
 Run in the locked .oracle environment. AR loads only AR parameters. Acoustic
-calibration computes FP32 conditioning, releases AR weights, then loads FP32 NAR
-weights. The original upstream modules perform every learned operation. This is
+calibration streams one AR layer's weights during conditioning, then one NAR
+layer's weights during each velocity. Upstream modules perform every learned operation. This is
 accuracy calibration with explicit weight transfers, not a speed benchmark.
 """
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -34,12 +35,12 @@ def skeleton(directory):
     return model.eval().requires_grad_(False)
 
 
-def load_module(module, prefix, checkpoint, guard):
+def load_module(module, prefix, checkpoint, guard, *, dtype=torch.float32):
     guard.check()
-    # Load each module directly from CPU checkpoint storage to FP32 MPS. Never
-    # first allocate a full BF16 GPU model and then retain its cast buffers.
+    # Transfer checkpoint storage directly to the requested MPS precision;
+    # never retain a complete CPU/GPU model pair or full-model cast buffers.
     state = {
-        name: checkpoint.get_tensor(prefix + name).to(device="mps", dtype=torch.float32)
+        name: checkpoint.get_tensor(prefix + name).to(device="mps", dtype=dtype)
         for name in module.state_dict()
     }
     module.load_state_dict(state, strict=True, assign=True)
@@ -49,14 +50,17 @@ def load_module(module, prefix, checkpoint, guard):
     guard.check()
 
 
-def load_ar(model, checkpoint, guard, *, output_head):
-    load_module(model.model.embed_tokens, "model.embed_tokens.", checkpoint, guard)
-    load_module(model.model.norm, "model.norm.", checkpoint, guard)
+def load_ar(model, checkpoint, guard, *, output_head, dtype=torch.float32):
+    load_module(model.model.embed_tokens, "model.embed_tokens.", checkpoint, guard, dtype=dtype)
+    load_module(model.model.norm, "model.norm.", checkpoint, guard, dtype=dtype)
     for index, layer in enumerate(model.model.layers):
         for name in AR_PARTS:
-            load_module(getattr(layer, name), f"model.layers.{index}.{name}.", checkpoint, guard)
+            load_module(
+                getattr(layer, name), f"model.layers.{index}.{name}.", checkpoint, guard,
+                dtype=dtype,
+            )
     if output_head:
-        load_module(model.lm_head, "lm_head.", checkpoint, guard)
+        load_module(model.lm_head, "lm_head.", checkpoint, guard, dtype=dtype)
 
 
 def release_ar(model):
@@ -68,6 +72,49 @@ def release_ar(model):
             getattr(layer, name).to_empty(device="meta")
     # Final RMSNorm is also used by NAR and must remain resident.
     torch.mps.empty_cache()
+
+
+@contextmanager
+def stream_layers(model, checkpoint, guard, parts):
+    """Keep one expert layer resident; parts run from input norm through MLP."""
+    hooks = []
+    try:
+        for index, layer in enumerate(model.model.layers):
+            def enter(_module, _inputs, *, layer=layer, index=index):
+                for name in parts:
+                    load_module(
+                        getattr(layer, name), f"model.layers.{index}.{name}.", checkpoint, guard,
+                    )
+
+            def leave(_module, _inputs, _result, *, layer=layer):
+                torch.mps.synchronize()
+                for name in parts:
+                    getattr(layer, name).to_empty(device="meta")
+                torch.mps.empty_cache()
+                guard.check()
+
+            hooks.append(getattr(layer, parts[0]).register_forward_pre_hook(enter))
+            hooks.append(getattr(layer, parts[-1]).register_forward_hook(leave))
+        yield
+    finally:
+        for hook in hooks:
+            hook.remove()
+        torch.mps.synchronize()
+        for layer in model.model.layers:
+            for name in parts:
+                getattr(layer, name).to_empty(device="meta")
+        torch.mps.empty_cache()
+
+
+def prefill_nar(model, chunk, checkpoint, guard):
+    """Run unchanged upstream conditioning with one resident FP32 AR layer."""
+    load_module(model.model.embed_tokens, "model.embed_tokens.", checkpoint, guard)
+    load_module(model.model.norm, "model.norm.", checkpoint, guard)
+    try:
+        with stream_layers(model, checkpoint, guard, AR_PARTS):
+            return CachedNAR(model, chunk, query_chunk_size=256)
+    finally:
+        release_ar(model)
 
 
 def checkpoint_arrays(output, stage, arrays, *, complete=False):
@@ -138,56 +185,65 @@ def raw_time(t):
 
 @torch.inference_mode()
 def capture_nar(args, guard, model, checkpoint):
+    metadata = json.loads((args.oracle / "nar.json").read_text())
+    if args.full_song and metadata.get("scope") != "full_song":
+        raise ValueError("Full-song calibration requires a complete full-song source capture")
     with np.load(args.oracle / "nar.npz", allow_pickle=False) as reference:
         codec = reference["codec"].tolist()
-        if not 1 <= len(codec) <= 500:
-            raise ValueError("Acoustic calibration requires a short 1..500 frame reference")
+        if not codec or (not args.full_song and len(codec) > 500):
+            raise ValueError(
+                "Acoustic calibration requires a 1..500 frame reference "
+                "unless --full-song is explicitly selected"
+            )
+        if metadata.get("frames") != len(codec):
+            raise ValueError("NAR oracle metadata frame count disagrees with nar.npz")
         prefix = reference["prefix"].tolist()
         noise = reference["noise"].copy()
         for name in ("vae2llm", "llm2vae", "time_embedder", "latent_pos_embed"):
             load_module(getattr(model, name), name + ".", checkpoint, guard)
-        load_ar(model, checkpoint, guard, output_head=False)
         chunk = Chunk(prefix + [token + CODEC_OFFSET for token in codec] + [MUSIC_END],
                       torch.from_numpy(noise))
-        engine = CachedNAR(model, chunk, query_chunk_size=256)
+        engine = prefill_nar(model, chunk, checkpoint, guard)
         arrays = {"prefix": np.asarray(prefix, dtype=np.int32), "codec": np.asarray(codec, dtype=np.int32),
                   "noise": noise}
         try:
             for layer, (key, value) in enumerate(engine.cache):
                 arrays[f"k_{layer}"] = key.permute(1, 0, 2)[None].cpu().numpy()
                 arrays[f"v_{layer}"] = value.permute(1, 0, 2)[None].cpu().numpy()
-            release_ar(model)
             guard.check()
-            for index, layer in enumerate(model.model.layers):
-                for name in NAR_PARTS:
-                    load_module(getattr(layer, name), f"model.layers.{index}.{name}.", checkpoint, guard)
-            state = torch.from_numpy(noise).to("mps")
-            for step in range(32):
-                guard.check()
-                first = engine.velocity(state, raw_time(1 - step / 32))
-                mid = state - first / 64
-                velocity = engine.velocity(mid, raw_time(1 - step / 32 - 1 / 64))
-                if step in (0, 1, 15, 31):
-                    for name, value in (("state", state), ("velocity", first),
-                                        ("mid", mid), ("mid_velocity", velocity)):
-                        arrays[f"{name}_{step}"] = value.cpu().numpy()
-                    checkpoint_arrays(args.output, "nar", arrays)
-                state = state - velocity / 32
-                torch.mps.synchronize()
-            arrays["latents"] = state.cpu().numpy()
-            # Fixed BF16 states separate operator error from accumulated ODE error.
-            for step in (0, 1, 15, 31):
-                for name, state_name, t in (
-                    (f"fixed_velocity_{step}", f"state_{step}", 1 - step / 32),
-                    (f"fixed_mid_velocity_{step}", f"mid_{step}", 1 - step / 32 - 1 / 64),
-                ):
+            with stream_layers(model, checkpoint, guard, NAR_PARTS):
+                state = torch.from_numpy(noise).to("mps")
+                for step in range(32):
                     guard.check()
-                    fixed = torch.from_numpy(reference[state_name].copy()).to("mps")
-                    arrays[name] = engine.velocity(fixed, raw_time(t)).cpu().numpy()
-            checkpoint_arrays(args.output, "nar", arrays, complete=True)
+                    first = engine.velocity(state, raw_time(1 - step / 32))
+                    mid = state - first / 64
+                    velocity = engine.velocity(mid, raw_time(1 - step / 32 - 1 / 64))
+                    if step in (0, 1, 15, 31):
+                        for name, value in (("state", state), ("velocity", first),
+                                            ("mid", mid), ("mid_velocity", velocity)):
+                            arrays[f"{name}_{step}"] = value.cpu().numpy()
+                        checkpoint_arrays(args.output, "nar", arrays)
+                    state = state - velocity / 32
+                    torch.mps.synchronize()
+                arrays["latents"] = state.cpu().numpy()
+                # Fixed BF16 states separate operator error from accumulated ODE error.
+                for step in (0, 1, 15, 31):
+                    for name, state_name, t in (
+                        (f"fixed_velocity_{step}", f"state_{step}", 1 - step / 32),
+                        (f"fixed_mid_velocity_{step}", f"mid_{step}", 1 - step / 32 - 1 / 64),
+                    ):
+                        guard.check()
+                        fixed = torch.from_numpy(reference[state_name].copy()).to("mps")
+                        arrays[name] = engine.velocity(fixed, raw_time(t)).cpu().numpy()
+                checkpoint_arrays(args.output, "nar", arrays, complete=True)
         finally:
             engine.close()
-    return {"frames": len(codec), "steps": 32, "ar_weights_released_before_velocity": True}
+    return {
+        "frames": len(codec), "steps": 32, "ar_weights_released_before_velocity": True,
+        "ar_prefill_weight_residency": "one_layer",
+        "nar_velocity_weight_residency": "one_layer",
+        "scope": "full_song" if args.full_song else "bounded_fixture",
+    }
 
 
 def main():
@@ -200,7 +256,13 @@ def main():
     parser.add_argument("--prefill-chunk-size", type=int, default=256)
     parser.add_argument("--memory-budget-gib", type=float, default=16)
     parser.add_argument("--require-ac", action="store_true")
+    parser.add_argument(
+        "--full-song", action="store_true",
+        help="NAR only: calibrate a complete full-song source capture using staged FP32 weights",
+    )
     args = parser.parse_args()
+    if args.full_song and args.stage != "nar":
+        parser.error("--full-song is only valid for NAR calibration")
     if not 1 <= args.prefill_chunk_size <= 1024:
         parser.error("FP32 calibration prefill chunks must be in 1..1024")
     if version("torch") != "2.11.0" or version("transformers") != "4.57.6":

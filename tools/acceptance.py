@@ -52,10 +52,16 @@ def main():
     parser.add_argument("--precision", choices=("bf16", "8bit", "4bit"), default="bf16")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--corpus", default="validation/corpus.json", type=Path)
+    parser.add_argument(
+        "--case",
+        help="Recorded corpus case for full/sustain; defaults to tonight_awake",
+    )
     parser.add_argument("--require-ac", action="store_true")
     parser.add_argument("--memory-budget-gib", type=float, default=16)
     parser.add_argument("--vae-core-frames", type=int, default=256)
     args = parser.parse_args()
+    if args.case is not None and args.workload == "modes":
+        parser.error("--case is only valid for full/sustain; modes uses its fixed fixtures")
     if args.vae_core_frames < 1:
         parser.error("--vae-core-frames must be a positive integer")
     if args.output.exists() and any(args.output.iterdir()):
@@ -90,9 +96,12 @@ def main():
             }
             workloads.append(value)
     else:
+        case_id = "tonight_awake" if args.case is None else args.case
+        if case_id not in cases:
+            parser.error(f"Unknown recorded corpus case: {case_id}")
         for index in range(3 if args.workload == "sustain" else 1):
-            value = request(cases["tonight_awake"])
-            value["id"] = f"tonight_awake_{index + 1}"
+            value = request(cases[case_id])
+            value["id"] = f"{case_id}_{index + 1}"
             workloads.append(value)
 
     input_hashes = _input_hashes(args)
