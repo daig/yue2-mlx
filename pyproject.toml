@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lyra-yue2"
 version = "0.1.0"
-description = "BF16-first YuE2 music generation on Apple Silicon with MLX and MPS"
+description = "Optional historical Python reference for the native Lyra YuE2 runtime"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
@@ -13,7 +13,6 @@ license-files = ["LICENSE"]
 keywords = ["apple-silicon", "mlx", "music-generation", "yue2"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "Environment :: Console",
   "Intended Audience :: Developers",
   "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Python :: 3",
@@ -42,9 +41,6 @@ Issues = "https://github.com/daig/yue2-mlx/issues"
 [dependency-groups]
 dev = ["pytest==9.0.3", "ruff==0.15.7"]
 
-[project.scripts]
-lyra = "lyra.cli:main"
-
 [tool.hatch.build.targets.sdist]
 only-include = [
   ".gitignore",
@@ -56,7 +52,7 @@ only-include = [
   "oracle/requirements.in",
   "oracle/requirements.txt",
   "pyproject.toml",
-  "src/lyra",
+  "oracle/port/lyra",
   "tests",
   "tools",
   "uv.lock",
@@ -73,7 +69,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/lyra", "vendor/yue/src/yue2"]
+packages = ["oracle/port/lyra", "vendor/yue/src/yue2"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "vendor/yue/LICENSE" = "lyra/licenses/UPSTREAM_APACHE.txt"

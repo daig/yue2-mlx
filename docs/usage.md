@@ -1,6 +1,6 @@
 # Usage and API reference
 
-Run shell commands from the repository root after completing the [installation and model preparation](../README.md#quick-start). The shell examples assume `LYRA_VAE` was loaded from `models/paths.json` as shown there. To create an editable request, copy `examples/full-song.json` to `request.json`; requests are UTF-8 JSON. Python code belongs in a script run with `uv run python your_script.py`, or in a notebook using this project’s environment.
+Run shell commands from the repository root after completing the [native installation and model preparation](../README.md#quick-start). The shell examples assume `lyra` is on `PATH`, `MLX_ENABLE_TF32=0`, and `LYRA_VAE` was loaded with `plutil -extract vae raw -o - models/paths.json`. Production requires no Python environment. The seven commands are `prepare`, `doctor`, `generate`, `batch`, `plan`, `render-plan`, and `replay`. To create an editable request, copy `examples/full-song.json` to `request.json`; requests are UTF-8 JSON.
 
 ## CLI generation
 
@@ -19,7 +19,7 @@ A request is JSON. The smallest useful form is:
 Generate from the converted model and local VAE, with all model resolution forced offline:
 
 ```bash
-uv run lyra generate request.json \
+lyra generate request.json \
   --model models/converted \
   --vae "$LYRA_VAE" \
   --precision bf16 \
@@ -30,7 +30,7 @@ uv run lyra generate request.json \
 If the portable directory was exported, it contains both model paths:
 
 ```bash
-uv run lyra generate request.json --model models/offline --offline --output outputs/first-song
+lyra generate request.json --model models/offline --offline --output outputs/first-song
 ```
 
 Output directories must be absent or empty; Lyra never mixes or silently overwrites recordings. Use `--resume` to reuse a matching completed result or retry a matching interrupted/failed output. `--quiet` disables display progress without changing RNG or generation. `--require-ac` rejects a run that starts off AC power or loses AC power. CLI runs also write sampled resource evidence beside the output as `<output>.resources.jsonl` and `<output>.resources.json`.
@@ -39,8 +39,10 @@ Output directories must be absent or empty; Lyra never mixes or silently overwri
 
 The request path is optional when `--style` and `--lyrics` (or `--lyrics-file`) are supplied. `--id`, `--seed`, `--cfg-scale`, `--mode`, and `--abc`/`--abc-file` override matching JSON fields. A JSON request may use relative `lyrics_path` and `abc_path` values; they resolve relative to that request file. If `--output` is omitted, `generate` and `plan` use `runs/default/<id>`, while `batch` uses `runs/batch`.
 
+CLI values take precedence over request JSON fields. `--style` (also `--tags`) replaces the JSON style/tags value; explicit lyric/score file options replace the corresponding inline value or JSON path. CLI file paths are relative to the working directory, whereas JSON paths are relative to the request file. Pass the request either positionally or with `--request`, not both.
+
 ```bash
-uv run lyra generate \
+lyra generate \
   --style "English, warm piano pop, expressive vocal, 88 BPM" \
   --lyrics-file lyrics.txt \
   --abc-file validation/score.abc \
@@ -54,7 +56,7 @@ uv run lyra generate \
 A supplied score is read as UTF-8 while preserving its bytes through tokenization. `--abc`/`--abc-file` and `--mode` override the corresponding request fields:
 
 ```bash
-uv run lyra generate request.json \
+lyra generate request.json \
   --abc validation/score.abc \
   --mode full \
   --model models/converted \
@@ -79,26 +81,26 @@ The five valid paths are:
 `batch` reads one JSON request object per nonempty JSONL line. Every row requires a unique, single-component `id`; malformed rows are recorded as failures without creating a song directory. Batch execution is deliberately serial (`--concurrency 1` is the only accepted value) because one process-wide GPU workload is allowed.
 
 ```bash
-uv run lyra batch --input requests.jsonl \
+lyra batch --input requests.jsonl \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/batch
 ```
 
 The batch receipt is `outputs/batch/batch.json`. Add `--resume` to identity-check and reuse completed per-song results, or retry matching failed/interrupted rows.
 
-`doctor` reports dependency versions, OS/Python/architecture support, Metal backends and unsafe MPS environment flags without downloading models. Add `--verify-hashes --model ... --vae ...` to verify local conversion and decoder identities; its exit status is nonzero when the environment is not ready.
+`doctor` reports native dependency versions, OS/architecture support, Metal backends and unsafe execution environment settings without downloading models. Add `--verify-hashes --model ... --vae ...` to verify local conversion and decoder identities; its exit status is nonzero when the environment is not ready. Readiness does not establish native quality or performance parity.
 
 ```bash
-uv run lyra doctor
-uv run lyra doctor --verify-hashes \
+lyra doctor
+lyra doctor --verify-hashes \
   --model models/converted --vae "$LYRA_VAE" --precision bf16
 ```
 
 ## Requests and generation controls
 
-`SongRequest` fields are `style`, `lyrics`, `cot`, `seed`, `abc`, `cfg_scale`, and filename-safe `id`. Python also accepts `tags` as an alias for `style`, but the two cannot disagree. Seeds are integers in `[0, 2**63)` and belong to one request.
+`SongRequest` fields are `style`, `lyrics`, `cot`, `seed`, `abc`, `cfg_scale`, and filename-safe `id`. `tags` is an alias for `style`, but the two cannot disagree. Seeds are integers in `[0, 2**63)` and belong to one request.
 
-A CLI request may contain `generation_config`, `abc_sampling`, and `semantic_sampling`. In Python, pass `GenerationConfig` when constructing the pipeline and pass stage-local sampling overrides to `plan`, `generate_semantic`, or the end-to-end call. A sampling override dictionary changes only named fields.
+A CLI request may contain `generation_config`, `abc_sampling`, and `semantic_sampling`. In C++, set `PipelineOptions::generation` when constructing the pipeline and pass stage-local JSON sampling overrides to `plan`, `generate_semantic`, or `generate`. A sampling override changes only named fields.
 
 | Control | ABC default | Semantic default |
 |---|---:|---:|
@@ -123,80 +125,31 @@ Example fields to merge into a complete request JSON:
 }
 ```
 
-## Python API and independent stages
+## Native API and independent stages
 
-The end-to-end call returns a `SongResult`:
+The C++20 interface is [`lyra::Pipeline`](../native/include/lyra/pipeline.hpp), configured with `PipelineOptions`. It uses native MLX 0.32.2 for AR/NAR and native FP32 MPSGraph for decoding, with no PyTorch runtime.
 
-```python
-import os
+| Method | Input → output |
+|---|---|
+| `plan` | `SongRequest`, optional ABC sampling JSON → `SymbolicPlan` |
+| `generate_semantic` | `SymbolicPlan`, optional sampling JSON → `SemanticResult` |
+| `synthesize` | `SemanticResult`, explicit FP32 `FloatMatrix` noise → latent `FloatMatrix` |
+| `decode` | latent `FloatMatrix` → stereo audio `FloatMatrix` |
+| `generate` | `SongRequest`, optional ABC/semantic sampling JSON → `SongResult` |
+| `render` | `SymbolicPlan`, optional semantic sampling JSON → `SongResult` |
 
-from lyra import YuE2Pipeline
+`PipelineOptions` includes model/VAE paths, converted directory, precision, offline/progress/AC settings, memory budget, VAE core frames, query chunk size and generation configuration. `effective_config` reports the effective request configuration; `close` releases pipeline resources.
 
-with YuE2Pipeline.from_pretrained(
-    "models/converted",
-    vae=os.environ["LYRA_VAE"],
-    local_files_only=True,
-    precision="bf16",
-    memory_budget_gib=16,
-    vae_core_frames=256,
-    query_chunk_size=256,
-    progress=False,
-) as pipe:
-    song = pipe(
-        style="English, warm piano pop, expressive vocal, 88 BPM",
-        lyrics="[Verse]\nMorning finds the open road",
-        cot="full",
-        seed=831001,
-        semantic_sampling={"top_k": 80},
-    )
-    song.save("outputs/first-song.wav")
-    song.save_artifacts("outputs/first-song-artifacts")
+`SymbolicPlan` retains the request, ABC text and original token IDs/prefix, timing and ABC truncation state. `SemanticResult` retains that plan and codec-local IDs. Synthesis uses CPU FP32 `[T, 64]` matrices for noise and latents; decoding produces FP32 stereo audio. `SongResult` retains audio, semantic/latent/noise data, configuration, identities, timings and separate truncation flags. Audio export uses PCM-24 FLAC and float WAV.
 
-print(song.truncated)
-```
-
-Use `.flac` or `.wav`; FLAC is written as PCM-24 and WAV as float audio. `save_artifacts` always includes FLAC plus the replay inputs described below.
-Set `resource_path="outputs/python.resources.jsonl"` to retain sampled guard data and its companion `.json` report from a Python pipeline; set `require_ac=True` when AC continuity is required.
-
-The same pipeline exposes each stage directly:
-
-```python
-import os
-
-from lyra import GenerationConfig, SongRequest, YuE2Pipeline
-
-request = SongRequest(
-    style="English, warm piano pop, expressive vocal, 88 BPM",
-    lyrics="[Verse]\nMorning finds the open road",
-    cot="full",
-    seed=831001,
-    id="staged_song",
-)
-
-with YuE2Pipeline.from_pretrained(
-    "models/converted",
-    vae=os.environ["LYRA_VAE"],
-    local_files_only=True,
-    generation_config=GenerationConfig(ode_steps=32),
-) as pipe:
-    plan = pipe.plan(request=request, abc_sampling={"top_k": 30})
-    semantic = pipe.generate_semantic(plan, sampling={"top_k": 80})
-    latents = pipe.synthesize(semantic)
-    audio = pipe.decode(latents)
-```
-
-- `SymbolicPlan` retains the request, ABC text, original ABC token IDs, exact semantic prefix, timing, and ABC truncation state.
-- `SemanticResult` retains the plan, codec-local semantic IDs, timing, and semantic truncation state.
-- `synthesize` returns finite CPU FP32 `[T, 64]` latents. An optional finite CPU FP32 `noise=` array can replay an exact solver input.
-- `decode` accepts `[T, 64]` or `[1, 64, T]` latents and returns finite CPU FP32 `[samples, 2]` audio.
-- `SongResult` exposes `audio`, `sample_rate`, `abc`, `semantic`, `latents`, retained `noise`, effective `config`, weight identities, stage/load timing, request identity, and separate ABC/semantic truncation flags.
+The historical Python API remains under `oracle/port/lyra` for optional reference work. Root `pyproject.toml` and `uv.lock` retain its original package/import names, Python version and dependencies but no `project.scripts`. Only reference consumers need `uv sync --frozen` and `uv run python your_script.py`; they do not provide the production CLI.
 
 ## Exact plans, editing, and artifact replay
 
 Save a plan without rendering it:
 
 ```bash
-uv run lyra plan request.json \
+lyra plan request.json \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/plan
 ```
@@ -204,7 +157,7 @@ uv run lyra plan request.json \
 Render the exact saved plan later. The saved generation configuration and original ABC IDs/prefix are restored directly; ABC is not decoded and re-tokenized:
 
 ```bash
-uv run lyra render-plan outputs/plan \
+lyra render-plan outputs/plan \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/from-saved-plan
 ```
@@ -214,7 +167,7 @@ A saved plan is immutable integrity-checked input. Do not edit `outputs/plan/sco
 ```bash
 cp outputs/plan/score.abc edited.abc
 # Edit edited.abc, then generate a new recording:
-uv run lyra generate request.json \
+lyra generate request.json \
   --abc edited.abc --mode full \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/edited-recording
@@ -226,12 +179,12 @@ A full artifact directory can restart at either retained latents or retained sem
 
 ```bash
 # Reuse latents; run only the decoder.
-uv run lyra replay outputs/first-song-artifacts --stage decode \
+lyra replay outputs/first-song --stage decode \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/redecoded
 
 # Reuse semantic tokens and solver noise; rerun NAR and the decoder.
-uv run lyra replay outputs/first-song-artifacts --stage synthesize \
+lyra replay outputs/first-song --stage synthesize \
   --model models/converted --vae "$LYRA_VAE" --offline \
   --output outputs/resynthesized
 ```
@@ -244,34 +197,20 @@ A saved plan contains `plan.json`, `plan_manifest.json`, `abc_tokens.npy`, `pref
 
 `result.json` hashes every other artifact and records request/configuration/weight identity, stage timings, sample rate, duration, and separate truncation flags. `config.json` records effective sampling/CFG, backend and dtypes, geometry, RNG policy, runtime versions/hash, source commit, and decoder release. `weights` includes the complete conversion manifest for the generator and the verified VAE identity. A `status` of `complete` means the requested operation finished; it does not override `truncated.abc` or `truncated.semantic`.
 
-## Cancellation, callbacks, and ownership
+## Cancellation and ownership
 
-Python calls accept:
-
-```python
-song = pipe(
-    **request,
-    cancelled=stop_event.is_set,
-    on_token=lambda phase, native_id: record(phase, native_id),
-)
-```
-
-`cancelled` is polled before and during AR prefill/generation, before and during acoustic prefill/flow matching, and before VAE decoding. Cancellation raises `InterruptedError`. The token callback receives each actual native-ID ABC or semantic output once, including its end token; prefixes, supplied ABC, and CFG-only branch work are not reported as outputs. Display progress can be disabled independently.
-
-Per-request AR caches and per-chunk NAR state close in `finally` paths, so a cancelled request does not become implicit input to the next serial request. A resource-limit failure is latched by the execution guard and deliberately keeps failing that guarded pipeline. Use a context manager (or call `close`) to release resident model references, clear MLX/MPS caches, and release ownership. Results already copied to CPU remain usable after closing.
-
-One pipeline may retain weights between serial requests, but concurrent calls on one instance are unsupported. A process/thread lock allows only one Lyra GPU workload at a time; another process fails rather than contending for unified memory. Allocator limits are process-global and remain conservatively configured after the context exits.
+CLI interruption stops the current operation rather than treating partial artifacts as completed output. Use matching `--resume` for supported retries. One pipeline can retain weights between serial requests; concurrent calls are unsupported, and GPU execution ownership prevents competing Lyra workloads. `Pipeline::close` or destruction releases resident resources. The native public stage interface does not expose the historical Python token-callback/cancellation-callable API.
 
 ## Faithful execution and memory geometry
 
 - **AR:** MLX executes only the required Qwen3-compatible expert path with the pinned tokenizer, exact prompt/special-token layout, phase-local native-ID output projections, upstream minimum/end/repetition/top-k/top-p/CFG behavior, device-local sampling, absolute cache/RoPE positions, and 1024-token prefill chunks. BF16 mode keeps weights and caches in BF16. Each AR phase creates its own request-local MLX key from the full 63-bit seed and never mutates global MLX RNG state.
-- **NAR:** MLX preserves BF16 conditioning and solver arithmetic, two zero boundary latents, local learned latent positions, globally offset RoPE, the source timestep shift, and midpoint updates. The original chunk capacity is `min((24576 - len(prefix) - 3) // 2, 24576)` semantic frames. Each chunk prefills causal conditioning exactly once, then uses the original prefix plus only its local codec slice and `MUSIC_END`; earlier codec chunks are not accumulated. The CPU FP32 noise tensor is drawn once for the whole song with a request-local Torch generator, then sliced at those original cuts.
+- **NAR:** native MLX preserves BF16 conditioning and solver arithmetic, two zero boundary latents, local learned latent positions, globally offset RoPE, the source timestep shift, and midpoint updates: 32 steps mean 64 velocity calls. The original chunk capacity is `min((24576 - len(prefix) - 3) // 2, 24576)` semantic frames. Each chunk prefills causal conditioning exactly once, then uses the original prefix plus only its local codec slice and `MUSIC_END`; earlier codec chunks are not accumulated. A native Torch-compatible CPU noise algorithm draws FP32 noise once for the whole song from the request seed, then slices it at those original cuts; it does not load Torch.
 - **Attention:** `query_chunk_size=256` is the default query memory bound; every query still sees the full conditioning and acoustic key set. On the validated M5 runtime, noncausal BF16 acoustic attention uses a fused 64-query/16-key Metal kernel when the requested bound permits it. It reads BF16 Q/K/V directly, keeps softmax probabilities and matrix accumulators in FP32, and rounds only the result to BF16. It does not allocate a dense score matrix or expanded FP32 K/V buffers. Causal conditioning, smaller query bounds and unsupported devices/shapes retain the native precise paths; the short unmasked vector kernel already has FP32 opmath. MLX TF32 remains disabled. Query tiling is not local attention, streaming or a change to song chunks. Retained weights, KV and solver state stay BF16; quantized AR generation caches are discarded before BF16 NAR conditioning.
-- **VAE:** the default `YuE2-Vae` decoder is the original decoder-only FP32 PyTorch implementation on MPS. Default tiling is 256 latent-frame cores with a 16-frame halo and exact crop; there are no crossfades, shortened right context, or output padding. For `T` latent frames, output is 48 kHz stereo with `1920*T - 64` samples per channel. An alternate decoder must be passed explicitly; the benchmark `YuE2-Vae-legacy` is never silently substituted.
+- **VAE:** the default `YuE2-Vae` decoder is native decoder-only FP32 MPSGraph. Default tiling is 256 latent-frame cores with a 16-frame halo and exact crop; there are no crossfades, shortened right context, or output padding. For `T` latent frames, output is 48 kHz stereo with `1920*T - 64` samples per channel. An alternate decoder must be passed explicitly; the benchmark `YuE2-Vae-legacy` is never silently substituted.
 
-The default guard is a **sampled 16 GiB whole-process budget**, not a promise that framework counters sum to process use. At that budget it configures an 11 GiB **advisory** MLX limit, a 128 MiB MLX cache limit, and a 15 GiB **hard combined-Metal limit enforced when MPS allocates**. PyTorch's MPS allocator counts other Metal allocations, including MLX buffers; this is not a separate decoder allowance. Its driver-memory counter likewise overlaps MLX usage.
+The default guard is a **sampled 16 GiB whole-process budget**. It monitors process footprint, system memory pressure/headroom, swap growth and native runtime memory counters, with preflight checks for native decoder buffers and graph outputs. This is not a blanket MPSGraph hard cap, nor a claim that framework counters sum to process memory. Bounded prefill/query/VAE tiling remains necessary between samples. Existing swap at entry is not itself a failure.
 
-The monitor samples physical footprint, system availability/pressure, swap I/O, MLX counters, and MPS counters every 0.25 seconds. It stops at a sampled footprint over budget, non-normal pressure, less than 2 GiB available, more than 64 MiB new swap-outs, or more than 128 MiB swap-used growth from entry. Existing swap at entry is not a failure. Because process, headroom, pressure, and swap checks are sampled, bounded prefill/query/VAE tiling remains required.
+These are native implementation invariants, not numerical or performance acceptance results. Retained BF16/performance/listening/numerical measurements describe the historical Python implementation. Initial native migration uses reasoning-first implementation and bounded smoke execution; comprehensive native fidelity/performance auditing is deferred to user guidance.
 
 ## Reproducibility contract
 
@@ -280,7 +219,11 @@ Within the supported MLX runtime and unchanged request/configuration/weights, AR
 
 ## Portable offline models
 
-After preparation, export a self-contained generator and decoder directory (this makes another copy of the weights):
+Native generation can use the converted generator and pinned decoder directories directly. Copy both intact to an offline machine, retain their manifests, and pass their paths with `--model` and `--vae`; no Python environment is needed.
+
+### Optional historical reference export
+
+The following export API is available only in the optional Python reference environment (`uv sync --frozen`, then run a script with `uv run python`). It is not part of native installation or a native CLI command:
 
 ```python
 import os
@@ -292,15 +235,15 @@ with YuE2Pipeline.from_pretrained(
     pipe.save_pretrained("models/offline")
 ```
 
-The resulting directory can be used with `--model models/offline --offline`, without `--vae`. Keep the locked Python environment as well as the model directory.
+An already exported directory can be used by native `lyra` with `--model models/offline --offline`, without `--vae`. Keep the native executable, its relative `../lib/mlx.metallib`, and the libsndfile runtime dependency on the offline machine; the Python export environment is not needed to render.
 
 ## Experimental AR quantization
 
 BF16 is the MVP default. The optional variants below have not completed the matched listening assessment; do not treat them as equally validated defaults.
 
 ```bash
-uv run lyra prepare --cache-dir models/hf-cache --output models/converted --precision 8bit --offline
-uv run lyra prepare --cache-dir models/hf-cache --output models/converted --precision 4bit --offline
+lyra prepare --cache-dir models/hf-cache --output models/converted --precision 8bit --offline
+lyra prepare --cache-dir models/hf-cache --output models/converted --precision 4bit --offline
 ```
 
 These use affine, group-size-64, linear-only AR quantization. Both preserve the BF16 partitions required for acoustic conditioning and synthesis; they add files rather than quartering the complete installation’s disk size. Pass the matching `--precision` to generation. Cached pinned source snapshots are required when preparing variants.

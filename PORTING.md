@@ -1,18 +1,18 @@
 # M5 port — architecture and provenance
 
-The BF16-first MVP implements the complete generation pipeline. Core paths and sustained full-song execution have been exercised; strict AR numerical comparisons remain open, while the full-song NAR comparison is complete with one FP32-anchor cache failure accepted after listening review. Quantized quality acceptance remains open. See the [release instructions](README.md) and [current validation status](validation/README.md).
+The production pipeline is now C++20/Objective-C++ under `native/`: native MLX 0.32.2 AR/NAR and a native FP32 MPSGraph decoder. The CMake-built CLI has no Python entrypoint, subprocess fallback or PyTorch runtime. See the [build and release instructions](README.md).
 
-The invariants below originated in the initial investigation and remain design constraints. The explicitly historical random-weight probes are not release benchmarks or acceptance evidence.
+This is a reasoning-first migration with bounded native smoke execution. Comprehensive native fidelity/performance auditing is explicitly deferred to user guidance. All retained BF16 numerical, performance and listening results in this document and [validation](validation/README.md) belong to the historical Python implementation, not verified native acceptance. The invariants below remain design constraints; preserving them is not proof of parity.
 
 ## Decisions
 
 - **Port YuE2 faithfully; optimize execution, not the learned architecture.** Initial target: offline, single-song rendering on M5 Air (10 GPU cores, 32 GB). No real-time guarantee.
-- **MLX Python for AR and NAR.** Adapt MLX-LM Qwen3 for AR and implement YuE2's cached acoustic path with MLX primitives, including source-specific rounding. Preserve upstream stage boundaries: `plan → generate_semantic → synthesize → decode`.
-- **Upstream PyTorch/MPS is the reference, not the production AR backend.** It already has an MPS path. Start with a real checkpoint baseline rather than a separate bare-port project.
-- **Keep upstream FP32 MPS VAE initially.** Proven executable and secondary in cost. No need to port every stage before accelerating the expensive ones.
+- **Native MLX 0.32.2 for AR and NAR.** The C++ implementation preserves the Qwen3-compatible AR subset and cached acoustic path, including source-specific BF16 rounding and the same MPP kernel. Preserve upstream stage boundaries: `plan → generate_semantic → synthesize → decode`.
+- **Upstream PyTorch/MPS is an optional reference, never a production runtime.** The previous Python port is retained under `oracle/port/lyra` for later comparison with real checkpoint inputs.
+- **Native FP32 MPSGraph VAE.** Preserve decoder geometry, halo/crop behavior and full FP32 arithmetic without Python or Torch execution.
 - **BF16 fidelity baseline first; evaluate 8-bit AR, then 4-bit.** Keep BF16 KV and BF16 NAR initially. Quantized quality/default selection remains an empirical decision.
 - Reuse fast GQA attention, RMSNorm/RoPE, quantized linears, compilation and reusable buffers. Custom Metal only for measured remaining hotspots. No Core ML/ANE-first design; M5 GPU Neural Accelerators are separate hardware and already accessible through MLX.
-- Native Swift/GUI packaging is deferred. Additional Apple Silicon configurations require their own validation; the tested release target is the 32 GB M5 Air.
+- Native Swift/GUI packaging is deferred. Additional Apple Silicon configurations require their own validation; the currently validated hardware target is the 32 GB M5 Air, with macOS ≥26.2.
 
 ## Scope and provenance
 
@@ -22,7 +22,7 @@ The invariants below originated in the initial investigation and remain design c
 - Observed HF revisions: [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B/tree/1a96eca688d6ae5d7f0feb88573fec89920fcd19) and [YuE2-Vae](https://huggingface.co/m-a-p/YuE2-Vae/tree/95535e72a97bc0f09b8ada125d26b4009428c0e8). Record revisions, hashes and conversion settings in generated artifacts.
 - Default listening decoder: `YuE2-Vae`. Benchmark decoder: `YuE2-Vae-legacy`; never silently substitute it.
 - **Licenses:** code Apache-2.0; generator/VAE weights CC BY-NC 4.0. Do not assume commercial rights or omit upstream/third-party notices when reusing code.
-- Locked production environment: Python 3.12, MLX 0.32.2, MLX-LM 0.31.3, PyTorch 2.10.0 and Transformers 5.0.0. The reference uses separate PyTorch 2.11.0 / Transformers 4.57.6 pins. MLX M5 accelerator support requires macOS ≥26.2; local measurements used macOS 26.3.
+- Native build prerequisites: Xcode command line tools and Metal toolchain, CMake ≥3.25, Ninja and libsndfile 1.2. The installed layout is `bin/lyra` with relative `../lib/mlx.metallib`; libsndfile is a native runtime dependency. Root `pyproject.toml` / `uv.lock` are optional reference-only tooling, installed with `uv sync --frozen`, not CLI requirements; there is no `project.scripts`. Their historical Python 3.12, MLX 0.32.2, MLX-LM 0.31.3, PyTorch 2.10.0 and Transformers 5.0.0 pins remain for reference compatibility. The separate upstream oracle uses PyTorch 2.11.0 / Transformers 4.57.6. Historical local measurements used macOS 26.3.
 - **Subsequent oracle correction:** use the locked PyTorch 2.11.0 reference environment for real-checkpoint validation. PyTorch 2.10 MPS two-pass BF16/fp16 attention has a scratch-buffer memory-corruption defect ([fix #174945](https://github.com/pytorch/pytorch/pull/174945)). The historical random-weight measurements below are not a validated reference. See [`validation/README.md`](validation/README.md) for current environments and evidence.
 
 ## Architecture invariants and traps
@@ -39,7 +39,7 @@ The invariants below originated in the initial investigation and remain design c
 
 - Semantic tokens and 64-channel latents both run at 25 Hz. **32 midpoint steps = 64 velocity evaluations**, not 32.
 - Port `nar.py::CachedNAR`, not generic `modeling_yue2.py::nar_velocity`: causal AR conditioning prefill once, retain per-layer K/V, then run only NAR experts for each velocity evaluation. NAR queries attend all visible conditioning plus bidirectional acoustic positions.
-- Preserve CPU FP32 full-song noise draw/seed, BF16 solver arithmetic, timestep transform, zero boundary latents, local sinusoidal positions and global RoPE offsets.
+- Preserve the full-song CPU FP32 noise draw/seed using the native Torch-compatible noise algorithm (without loading Torch), BF16 solver arithmetic, timestep transform, zero boundary latents, local sinusoidal positions and global RoPE offsets.
 - Original chunk capacity: `(24576 - len(prefix) - 3) // 2`. Each chunk uses the **same original prefix + local codec slice + MUSIC_END**, not accumulated preceding codec slices. Ordinary songs fit one full-song chunk.
 - Query tiling must retain the complete key set. Shortening acoustic chunks/localizing attention changes model behavior; it is not equivalent memory tiling or free streaming.
 - The M5 noncausal acoustic path now uses a fused 64-query/16-key Metal kernel with direct BF16 Q/K/V loads, FP32 softmax and FP32 accumulation. MPP `relaxed_precision=false` preserves FP32 probability operands; safe compiler math remains enabled. The original 16-key online reduction width and pairwise 8-key summation order matter for the retained intermediate bounds. Causal prefill and smaller query bounds retain the native precise path; AR math is unchanged.
@@ -48,11 +48,14 @@ The invariants below originated in the initial investigation and remain design c
 ### VAE and memory
 
 - Decoder-only FP32, 48 kHz stereo; natural samples/channel = `1920*T - 64`.
-- Preserve halo-and-crop decoding: upstream core 1024 frames, port default 256, halo 16; measured required halo 12. No crossfades, truncated right context or output padding. Smaller cores are a memory tradeoff, unlike smaller NAR chunks.
+- Preserve halo-and-crop decoding: upstream core 1024 frames, port default 256, halo 16; the historical Python investigation measured required halo 12. No crossfades, truncated right context or output padding. Smaller cores are a memory tradeoff, unlike smaller NAR chunks.
 - Avoid unnecessary stage weight transfers/duplicate full models on unified memory. Keep large tensors resident when capacity permits; CPU artifact conversion once per stage is acceptable, not inside hot loops.
-- Later VAE conversion must audit accumulation precision, including MLX TF32 behavior; an FP32 tensor dtype alone is insufficient evidence of FP32 arithmetic parity.
+- The native resource guard remains sampled process/memory-pressure enforcement, with preflight checks for decoder buffers and graph outputs, not a blanket MPSGraph hard cap. Bounded tiling remains necessary.
+- Keep `MLX_ENABLE_TF32=0`. An FP32 tensor dtype alone is insufficient evidence of arithmetic parity; native decoder fidelity still requires its own audit. Preserve PCM-24 FLAC and float WAV export.
 
-## Measured acoustic optimization
+## Historical Python acoustic optimization
+
+All measurements and listening judgments in this section refer to the Python port, not the native migration.
 
 The precise MPP kernel is measured against the frozen pre-optimization MLX implementation, using identical real-checkpoint inputs and full solver work. Across baseline-first and optimized-first pairs on the 32 GB M5 Air, mean acoustic-stage time was **524.18 → 453.11 seconds** for 4493 frames, a **13.6% reduction**. The 400-frame mean was **11.51 → 10.57 seconds**, an **8.2% reduction**. Model loading, one warmup velocity per run and decoding are excluded.
 
@@ -60,7 +63,7 @@ Run-order effects are substantial; the two full-song pairs are not a confidence 
 
 See [validation/nar-optimization.json](validation/nar-optimization.json) for input/code/report hashes, paired timings, arithmetic settings, numerical evidence and resource measurements.
 
-The subsequent exact-input 4493-frame upstream BF16 acoustic capture completed using staged expert residency: 76 arrays, all 32 midpoint steps, 8.54 GiB sampled peak footprint and no new swap-outs. Fully streamed FP32 calibration completed with 84 arrays and 11.50 GiB peak footprint; its same-runtime 64-frame control is bitwise identical to the fully resident loader across all 84 arrays. Full-song bounds were derived solely from these references. Production MLX passes all 82 source comparisons but fails the strict FP32-anchor `k_9` maximum-error bound (0.38304 > 0.27740). Given the successful human listening sign-off, this localized numeric divergence in the Metal kernel is deemed acceptable for the performance gain, closing the full-song numerical acceptance gate. Experimental causal-kernel replacements also fail existing comparisons and are not merged. AC enforcement is optional at the maintainer's request; memory guards remain unchanged. See [validation/full-song-reference.json](validation/full-song-reference.json) and the [reproduction commands](validation/README.md#reproduction-tools).
+The subsequent exact-input 4493-frame upstream BF16 acoustic capture completed using staged expert residency: 76 arrays, all 32 midpoint steps, 8.54 GiB sampled peak footprint and no new swap-outs. Fully streamed FP32 calibration completed with 84 arrays and 11.50 GiB peak footprint; its same-runtime 64-frame control is bitwise identical to the fully resident loader across all 84 arrays. Full-song bounds were derived solely from these references. The historical Python MLX port passes all 82 source comparisons but fails the strict FP32-anchor `k_9` maximum-error bound (0.38304 > 0.27740). Listening sign-off accepted this localized divergence as a performance tradeoff; the raw numerical gate remains failed. Experimental causal-kernel replacements also fail existing comparisons and are not merged. AC enforcement is optional; memory guards remain required. See [validation/full-song-reference.json](validation/full-song-reference.json) and the [historical reproduction commands](validation/README.md#reproduction-tools).
 
 ## Historical performance probes — not release benchmarks
 
@@ -82,7 +85,7 @@ Historical pre-optimization end-to-end measurements are in [validation/mvp-resul
 
 ## Deferred validation and optimization
 
-1. Complete matched full-length teacher-forced AR comparisons (strict AR numerical failures remain open). Exact-input acoustic comparisons are complete and their numeric divergence is perceptually accepted.
-2. Obtain matched 8-bit and 4-bit listening before declaring a final quality-supported quantized precision policy. (BF16 complete-song human review is signed off).
+1. Under user guidance, audit native fidelity and performance with matched saved IDs/noise and the retained oracle. Initial smoke execution does not waive any historical bound or establish a native benchmark.
+2. Historical Python follow-up remains available: strict teacher-forced AR failures, the retained full-song FP32-anchor cache failure, and matched 8-bit/4-bit listening before choosing a quality-supported quantization policy. Historical BF16 listening sign-off does not transfer automatically to native code.
 
 Navigation under upstream `src/yue2/`: `pipeline.py` (stages/artifacts), `protocol.py` + `sampling.py` (behavior), `fast.py` (AR extraction), `modeling_yue2.py` (weights/math), `nar.py` (cached solver), `modeling_vae.py` (FP32 decoder/halo rules). Read these before implementing; preserve the source contract rather than inventing a parallel convention.

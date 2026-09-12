@@ -1,6 +1,10 @@
-# Validation status — BF16 MVP
+# Historical Python validation status — BF16 MVP
 
-This release exposes the working generation pipeline with explicit open acceptance gates. It does not claim that all reference-equivalence or listening checks pass. No numerical threshold was relaxed to publish the MVP.
+**Provenance boundary:** the results, timings, listening judgments, numerical bounds and reproduction tooling below describe the prior Python implementation, now retained under `oracle/port/lyra`, and its separately locked upstream oracle. References below to “production” or “the port” describe that historical implementation, not the current CMake-built native CLI. No historical JSON evidence has been rewritten as native acceptance.
+
+The current native MLX 0.32.2 / FP32 MPSGraph migration is reasoning-first with bounded smoke execution; comprehensive native fidelity/performance auditing is explicitly deferred to user guidance. Native installation and all current CLI workflows are documented in [README](../README.md) and [usage](../docs/usage.md), with no Python requirement. Root `pyproject.toml` and `uv.lock` remain optional reference-only tooling (`uv sync --frozen`), preserve the historical Python dependencies/imports, and expose no `project.scripts` CLI entrypoint.
+
+The historical BF16 release exposed the working Python pipeline with explicit open acceptance gates. It did not claim that all reference-equivalence or listening checks passed. No numerical threshold was relaxed to publish it.
 
 ## Evidence included in the repository
 
