@@ -25,6 +25,7 @@
  */
 #include "lyra/vae.hpp"
 #include "lyra/storage.hpp"
+#include "lyra/runtime.hpp"
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
@@ -116,6 +117,14 @@ struct GraphRun {
   MPSGraphTensor* mul(MPSGraphTensor* a, MPSGraphTensor* b) { return [graph multiplicationWithPrimaryTensor:a secondaryTensor:b name:nil]; }
   MPSGraphTensor* div(MPSGraphTensor* a, MPSGraphTensor* b) { return [graph divisionWithPrimaryTensor:a secondaryTensor:b name:nil]; }
   MPSGraphTensorData* run(id<MTLCommandQueue> queue, MPSGraphTensorData* value = nil) {
+    uint64_t output_bytes = sizeof(float);
+    for (NSNumber* extent in output.shape) {
+      const auto dimension = extent.unsignedLongLongValue;
+      if (!dimension || output_bytes > UINT64_MAX / dimension)
+        throw Error("ValueError", "Invalid decoder graph output size");
+      output_bytes *= dimension;
+    }
+    check_metal_allocation(output_bytes);
     if (input) feeds[input] = value;
     auto compilation = [MPSGraphCompilationDescriptor new];
     compilation.optimizationLevel = MPSGraphOptimizationLevel0;
@@ -131,7 +140,8 @@ struct GraphRun {
         targetOperations:nil executionDescriptor:execution];
     } @catch (NSException* exception) {
       if (input) [feeds removeObjectForKey:input];
-      throw Error("RuntimeError", std::string(exception.reason.UTF8String ?: "MPSGraph VAE exception"));
+      const char* reason = exception.reason.UTF8String;
+      throw Error("RuntimeError", reason ? reason : "MPSGraph VAE exception");
     }
     if (failure) {
       if (input) [feeds removeObjectForKey:input];
@@ -204,6 +214,7 @@ struct VAE::Impl {
     if (it == sources.end()) throw Error("ValueError", "Missing VAE tensor: " + name);
     const auto& source = it->second;
     if (source.dims != expected) throw Error("ValueError", "VAE tensor shape mismatch: " + name);
+    check_metal_allocation(source.bytes);
     auto buffer = [device newBufferWithLength:source.bytes options:MTLResourceStorageModeShared];
     if (!buffer) throw Error("MemoryError", "Unable to allocate VAE weight buffer");
     std::ifstream input(source.file, std::ios::binary);
@@ -325,6 +336,7 @@ struct VAE::Impl {
   MPSGraphTensorData* tile(const FloatMatrix& latent, int64_t left, int64_t right, const Cancelled& cancelled) {
     int64_t length = right-left;
     check_cancel(cancelled);
+    check_metal_allocation(length*latent_dim*sizeof(float));
     auto buffer = [device newBufferWithLength:length*latent_dim*sizeof(float) options:MTLResourceStorageModeShared];
     if (!buffer) throw Error("MemoryError", "Unable to allocate VAE latent tile");
     float* data = static_cast<float*>(buffer.contents);

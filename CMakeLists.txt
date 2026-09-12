@@ -55,7 +55,9 @@ add_library(lyra_core STATIC
   native/src/vae.mm
   native/src/audio.cpp
   native/src/noise.cpp
-  native/src/artifacts.cpp)
+  native/src/artifacts.cpp
+  native/src/pipeline.cpp
+  native/src/cli.cpp)
 target_include_directories(lyra_core PUBLIC native/include)
 target_link_libraries(lyra_core PUBLIC mlx nlohmann_json::nlohmann_json
   PRIVATE CURL::libcurl SndFile::sndfile ${FOUNDATION_FRAMEWORK}
@@ -65,8 +67,18 @@ target_compile_options(lyra_core PRIVATE
   -Wall -Wextra -Wpedantic -ffp-contract=off)
 target_compile_definitions(lyra_core PUBLIC
   LYRA_VERSION="${PROJECT_VERSION}" LYRA_MLX_VERSION="0.32.2")
+add_executable(lyra native/src/main.mm)
+target_compile_options(lyra PRIVATE -fobjc-arc)
+target_link_libraries(lyra PRIVATE lyra_core)
+set_target_properties(lyra PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  INSTALL_RPATH "@executable_path/../${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS lyra RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT lyra)
+install(FILES "${MLX_METAL_PATH}/mlx.metallib"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT lyra)
 install(FILES LICENSE vendor/yue/MODEL_LICENSE vendor/yue/THIRD_PARTY_NOTICES.md
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses)
-install(DIRECTORY vendor/yue/licenses/ DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses)
-install(FILES "${mlx_SOURCE_DIR}/LICENSE" DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses RENAME MLX-MIT.txt)
-install(DIRECTORY native/include/lyra DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses COMPONENT lyra)
+install(DIRECTORY vendor/yue/licenses/ native/licenses/
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses COMPONENT lyra)
+install(FILES "${mlx_SOURCE_DIR}/LICENSE"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses RENAME MLX-MIT.txt COMPONENT lyra)

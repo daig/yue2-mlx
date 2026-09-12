@@ -94,6 +94,23 @@ const std::string& metallib_hash() {static const std::string hash=sha256_file(me
 double monotonic_seconds() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 bool cancellation_requested() { return interrupted!=0; }
 void check_cancelled() { if(cancellation_requested()) throw Error("InterruptedError","Execution interrupted by signal "+std::to_string(interrupted)); }
+void check_metal_allocation(uint64_t bytes) {
+  check_cancelled();
+  std::unique_lock lock(gpu_mutex, std::try_to_lock);
+  if (!lock.owns_lock() || gpu_owners.empty())
+    throw Error("RuntimeError", "Metal allocation requires the active GPU execution guard");
+  for (auto* monitor : gpu_monitors) monitor->check();
+  double budget = gpu_owners.front().second;
+  for (const auto& owner : gpu_owners) budget = std::min(budget, owner.second);
+  const uint64_t limit = static_cast<uint64_t>((budget - 1) * GiB);
+  @autoreleasepool {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) throw Error("RuntimeError", "Metal device unavailable during allocation");
+    const uint64_t allocated = device.currentAllocatedSize;
+    if (allocated > limit || bytes > limit - allocated)
+      throw Error("MemoryError", "Metal allocation exceeds the process GPU budget");
+  }
+}
 void initialize_runtime() {
   const char* precision=std::getenv("MLX_ENABLE_TF32");
   if(precision && std::string_view(precision)!="0") throw Error("RuntimeError","Set MLX_ENABLE_TF32=0 before using MLX for faithful attention");
@@ -125,7 +142,7 @@ Json runtime_info() {
     catch(const std::exception& e) {errors["mlx_metallib"]=e.what();}
     try {
       available=errors.empty() && mlx::core::metal::is_available();
-      if(available) for(const auto& [key,value]:mlx::core::metal::device_info()) std::visit([&](const auto& v){device[key]=v;},value);
+      if(available) for(const auto& [key,value]:mlx::core::device_info(mlx::core::Device(mlx::core::Device::gpu))) std::visit([&](const auto& v){device[key]=v;},value);
       else errors["mlx_metal"]="MLX Metal is required; CPU fallback is not supported";
     } catch(const std::exception& e) {errors["mlx_metal"]=e.what();}
     if(std::string_view(std::getenv("MLX_ENABLE_TF32"))!="0") unsafe["MLX_ENABLE_TF32"]=std::getenv("MLX_ENABLE_TF32");
@@ -153,7 +170,9 @@ Json power_source() {
 Json memory_snapshot() {
   vm_statistics64_data_t vm{}; mach_msg_type_number_t count=HOST_VM_INFO64_COUNT;
   mach_port_t host=mach_host_self(); auto status=host_statistics64(host,HOST_VM_INFO64,reinterpret_cast<host_info64_t>(&vm),&count); mach_port_deallocate(mach_task_self(),host);
-  if(status!=KERN_SUCCESS || count<HOST_VM_INFO64_COUNT) throw Error("OSError","host_statistics64 failed: status="+std::to_string(status)+", count="+std::to_string(count));
+  // New SDKs append fields that older supported kernels do not return. All
+  // counters used here are present through the revision-1 structure.
+  if(status!=KERN_SUCCESS || count<HOST_VM_INFO64_REV1_COUNT) throw Error("OSError","host_statistics64 failed: status="+std::to_string(status)+", count="+std::to_string(count));
   rusage_info_v4 usage{};
   if(proc_pid_rusage(getpid(),RUSAGE_INFO_V4,reinterpret_cast<rusage_info_t*>(&usage))) os_error("proc_pid_rusage");
   auto swap=sysctl_value<xsw_usage>("vm.swapusage"); auto total=sysctl_value<uint64_t>("hw.memsize");
@@ -266,7 +285,8 @@ GPUExecution::GPUExecution(double budget,bool ac):impl_(std::make_unique<Impl>(b
     double effective=budget;for(const auto& owner:gpu_owners) effective=std::min(effective,owner.second);
     mlx::core::set_memory_limit(size_t((effective-5)*GiB));mlx::core::set_cache_limit(128*MiB);
     Json metadata={{"gpu_backend","mlx"},{"memory_budget_gib",budget},{"whole_process_limit_kind","sampled"},{"maximum_new_swap_out_bytes",64*MiB},
-      {"mlx_default_device","gpu"},{"mlx_advisory_memory_limit_bytes",size_t((effective-5)*GiB)},{"mlx_cache_limit_bytes",128*MiB},{"mlx_tf32_enabled",false},{"metal_allocation_limit_kind","sampled whole-process footprint; no hard cap"}};
+      {"mlx_default_device","gpu"},{"mlx_advisory_memory_limit_bytes",size_t((effective-5)*GiB)},{"mlx_cache_limit_bytes",128*MiB},{"mlx_tf32_enabled",false},
+      {"metal_allocation_limit_bytes",size_t((effective-1)*GiB)},{"metal_allocation_limit_kind","native decoder buffers and graph outputs; graph intermediates additionally sampled"}};
     p.monitor=std::make_unique<ResourceMonitor>(ac,std::nullopt,std::nullopt,metadata,[&p](const Json& s){p.sample(s);});
     gpu_monitors.push_back(p.monitor.get());
     static bool verified=false;

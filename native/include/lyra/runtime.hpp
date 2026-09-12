@@ -9,6 +9,7 @@ Json runtime_info();
 Json memory_snapshot();
 Json power_source();
 void check_cancelled();
+void check_metal_allocation(uint64_t bytes);
 bool cancellation_requested();
 double monotonic_seconds();
 class ResourceMonitor {
