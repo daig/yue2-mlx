@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// A local, read-only preview of ABC notation, independent of generation workflows.
+/// Offline notation with an optional native document-backed editing session.
 @MainActor
 struct ABCScoreView: View {
   let abc: String
+  var session: ABCScoreSession?
 
   @Environment(\.colorScheme) private var colorScheme
   @State private var zoom = 1.0
@@ -12,7 +13,25 @@ struct ABCScoreView: View {
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 8) {
-        Text("Score").font(.headline)
+        Text(session == nil ? "Score" : "Write").font(.headline)
+        if let session {
+          Button {
+            session.document.undo()
+          } label: {
+            Image(systemName: "arrow.uturn.backward")
+          }
+          .disabled(!session.document.canUndo)
+          .help("Undo score edit (Command–Z while editing notation)")
+          .accessibilityIdentifier("score.undo")
+          Button {
+            session.document.redo()
+          } label: {
+            Image(systemName: "arrow.uturn.forward")
+          }
+          .disabled(!session.document.canRedo)
+          .help("Redo score edit (Shift–Command–Z while editing notation)")
+          .accessibilityIdentifier("score.redo")
+        }
         Spacer()
         Button {
           zoom = max(0.5, zoom - 0.25)
@@ -45,32 +64,36 @@ struct ABCScoreView: View {
       ZStack {
         ABCScoreWebView(
           request: ABCScoreRequest(
-            abc: abc, theme: colorScheme == .dark ? "dark" : "light", zoom: zoom),
-          onStatus: { status = $0 }
+            abc: abc, theme: colorScheme == .dark ? "dark" : "light", zoom: zoom,
+            editor: session.map { ABCScoreEditorRequest(document: $0.document) }),
+          onStatus: { status = $0 },
+          session: session
         )
         .accessibilityIdentifier("abcScore.notation")
-        .opacity(visibleState == .rendered ? 1 : 0)
-        .allowsHitTesting(visibleState == .rendered)
-        .accessibilityHidden(visibleState != .rendered)
+        .opacity(session != nil || visibleState == .rendered ? 1 : 0)
+        .allowsHitTesting(session != nil || visibleState == .rendered)
+        .accessibilityHidden(session == nil && visibleState != .rendered)
 
-        switch visibleState {
-        case .loading:
-          ProgressView("Rendering score…")
-        case .empty:
-          ContentUnavailableView(
-            "No notation", systemImage: "music.note",
-            description: Text("There is no renderable notation in this ABC source."))
-        case .failed:
-          ContentUnavailableView(
-            "Unable to display score", systemImage: "exclamationmark.triangle",
-            description: Text(verbatim: status.message ?? "The notation renderer failed."))
-        case .rendered:
-          EmptyView()
+        if session == nil {
+          switch visibleState {
+          case .loading:
+            ProgressView("Rendering score…")
+          case .empty:
+            ContentUnavailableView(
+              "No notation", systemImage: "music.note",
+              description: Text("There is no renderable notation in this ABC source."))
+          case .failed:
+            ContentUnavailableView(
+              "Unable to display score", systemImage: "exclamationmark.triangle",
+              description: Text(verbatim: status.message ?? "The notation renderer failed."))
+          case .rendered:
+            EmptyView()
+          }
         }
       }
       .frame(minHeight: 180)
 
-      if status.abc == abc, !status.warnings.isEmpty {
+      if session == nil, status.abc == abc, !status.warnings.isEmpty {
         Divider()
         DisclosureGroup("Parser warnings (\(status.warnings.count))") {
           ScrollView {

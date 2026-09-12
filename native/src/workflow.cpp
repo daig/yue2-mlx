@@ -83,7 +83,7 @@ void validate_options(Operation operation, const Json &options) {
     const auto &overrides = options.at("overrides");
     for (auto it = overrides.begin(); it != overrides.end(); ++it) {
       if (it.key() == "id" || it.key() == "style" || it.key() == "lyrics" ||
-          it.key() == "cot") {
+          it.key() == "cot" || it.key() == "abc") {
         if (!it->is_string())
           throw WorkflowInputError(it.key() + " override must be a string");
       } else if (it.key() == "seed") {
@@ -134,8 +134,8 @@ Json request(const WorkflowOptions &a,
     data[it.key()] = it.value();
     if (it.key() == "style")
       data.erase("tags");
-    if (it.key() == "lyrics")
-      data.erase("lyrics_path");
+    if (it.key() == "lyrics" || it.key() == "abc")
+      data.erase(it.key() + "_path");
   }
   for (std::string field : {"lyrics", "abc"}) {
     if (a.has(field + "_file")) {

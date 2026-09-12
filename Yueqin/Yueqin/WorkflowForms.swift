@@ -165,13 +165,25 @@ struct WorkflowForm: View {
           identifier: "request.override.cfg_scale"
         ) { cfgField }
         override(
-          "Override ABC with a file", enabled: $draft.request.overrideABC,
+          "Override ABC score", enabled: $draft.request.overrideABC,
           identifier: "request.override.abc"
         ) {
-          PathField(
-            title: "ABC score", path: $draft.request.abcPath, selection: .file,
-            identifier: "request.abc",
-            guidance: "Supplied UTF-8 ABC is preserved exactly. Incompatible with cot = off.")
+          Picker("ABC override source", selection: $draft.request.scoreSource) {
+            Text("ABC file").tag("file")
+            Text("ABC text").tag("text")
+          }
+          .accessibilityIdentifier("request.abc_override_source")
+          if draft.request.scoreSource == "text" {
+            MultilineField(
+              title: "ABC score", text: $draft.request.abc, identifier: "request.abc",
+              guidance: "Exact score snapshot, including editor changes. Use full or melody mode.",
+              monospaced: true)
+          } else {
+            PathField(
+              title: "ABC score", path: $draft.request.abcPath, selection: .file,
+              identifier: "request.abc",
+              guidance: "Supplied UTF-8 ABC is preserved exactly. Incompatible with cot = off.")
+          }
         }
       }
     } else {

@@ -7,6 +7,9 @@
     let revision = -1;
     let zoom = 1;
     let result = { state: "empty", tuneCount: 0, warnings: [] };
+    const editor = window.YueqinScoreEditor;
+    let tunes = [];
+    let renderedEditable = false;
 
     // abcjs warning strings contain this formatting wrapper, with escaped source
     // around it. Decode as text, never by assigning source to an HTML parser.
@@ -22,7 +25,7 @@
     }
 
     function report() {
-        window.webkit?.messageHandlers.abcScore?.postMessage({ revision, ...result });
+        window.webkit?.messageHandlers.abcScore?.postMessage({ kind: "status", revision, ...result, editor: editor?.status() });
     }
 
     function applyZoom() {
@@ -38,6 +41,7 @@
     }
 
     function render() {
+        tunes = [];
         score.replaceChildren();
         result = { state: "empty", tuneCount: 0, warnings: [] };
         if (!source.trim()) {
@@ -62,7 +66,8 @@
                 try {
                     // TuneBook carries file-wide directives into each entry.
                     // Isolating renders lets a malformed tune leave other tunes useful.
-                    const tunes = window.ABCJS.renderAbc(paper, entry.abc, {
+                    const rendered = window.ABCJS.renderAbc(paper, source, {
+                        startingTune: index,
                         responsive: "resize",
                         paddingleft: 15,
                         paddingright: 15,
@@ -73,15 +78,21 @@
                         // can misalign multi-measure rests; scale the SVG instead.
                         expandToWidest: true,
                         foregroundColor: "currentColor",
-                        selectionColor: "currentColor",
-                        selectTypes: false,
-                        dragging: false,
+                        selectionColor: "#778bea",
+                        dragColor: "#778bea",
+                        add_classes: true,
+                        selectTypes: editor?.active() ? ["note"] : false,
+                        dragging: !!editor?.active(),
+                        clickListener(element, tuneNumber, classes, analysis, drag, mouseEvent) {
+                            editor?.click(element, drag, mouseEvent);
+                        },
                         afterParsing(tune) {
                             parsedTune = tune;
                             for (const warning of tune.warnings || []) warnings.add(plainWarning(warning));
                         }
                     });
-                    parsedTune = tunes?.[0] || parsedTune;
+                    parsedTune = rendered?.[0] || parsedTune;
+                    if (parsedTune) tunes.push(parsedTune);
                     for (const warning of parsedTune?.warnings || []) warnings.add(plainWarning(warning));
                     if (hasNotation(parsedTune) && paper.querySelector("svg")) {
                         result.tuneCount += 1;
@@ -111,25 +122,49 @@
             result.message = errorMessage(error);
         }
         applyZoom();
+        editor?.didRender();
     }
 
+    function highlight(starts, playing = false) {
+        const selected = new Set(starts);
+        for (const tune of tunes) {
+            const engraver = tune.engraver;
+            for (const item of engraver?.selectables || []) {
+                const element = item.absEl?.abcelem;
+                const node = item.svgEl;
+                if (!element || !node?.classList) continue;
+                const contains = starts.some(start => start >= element.startChar && start < element.endChar);
+                node.classList.toggle(playing ? "score-playing" : "score-selected", contains || selected.has(element.startChar));
+                if (!playing) {
+                    item.absEl.unhighlight(undefined, "currentColor");
+                    if (contains) item.absEl.highlight(undefined, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim());
+                }
+            }
+        }
+    }
+    editor?.attach({
+        render(value) { source = value; render(); },
+        report, highlight,
+        playhead(starts) { highlight(starts, true); }
+    });
     window.YueqinABCScore = Object.freeze({
         update(payload) {
-            if (payload.revision < revision) return;
+            const newEpoch = (payload.editor?.id ?? null) !== (editor?.snapshot().id ?? null);
+            if (!newEpoch && !payload.editor && payload.revision < revision) return;
             revision = payload.revision;
             document.documentElement.dataset.theme = payload.theme === "dark" ? "dark" : "light";
             zoom = Number.isFinite(payload.zoom) ? Math.min(3, Math.max(0.5, payload.zoom)) : 1;
-            const changed = source !== payload.abc;
-            source = payload.abc;
-            if (changed) {
-                render();
-                viewport.scrollLeft = 0;
-                viewport.scrollTop = 0;
-            } else {
-                applyZoom();
-            }
+            const adopted = editor?.adopt(payload) || { abc: payload.abc, reset: true };
+            const editable = !!payload.editor;
+            const changed = source !== adopted.abc || renderedEditable !== editable;
+            source = adopted.abc;
+            renderedEditable = editable;
+            if (changed) render(); else applyZoom();
+            if (adopted.reset) { viewport.scrollLeft = 0; viewport.scrollTop = 0; }
             report();
-        }
+        },
+        command(action, value = "") { return editor?.command(action, value); },
+        snapshot() { return editor?.snapshot(); }
     });
 
     // This surface is notation only, never a link, form, or drag destination.

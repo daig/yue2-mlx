@@ -230,7 +230,10 @@ import UniformTypeIdentifiers
     }
     if controller.succeeded, let output = controller.outputURL {
       if controller.lastSubmission?.kind == .plan {
-        Button("Render this plan", systemImage: "waveform") { onUseOutput(.renderPlan, output) }
+        Button("Render saved plan", systemImage: "waveform") { onUseOutput(.renderPlan, output) }
+          .help(
+            "Renders the original saved plan, not editor changes. Use in song submits the current edited score."
+          )
           .accessibilityIdentifier("result.render_plan")
       } else if let kind = controller.lastSubmission?.kind,
         [WorkflowKind.generate, .renderPlan, .replay].contains(kind)

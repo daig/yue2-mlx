@@ -10,6 +10,12 @@ final class YueqinWorkspace {
   var inputError: String?
   let settings = EngineSettings()
   let runner = RunController()
+  let scoreDocument: ScoreDocument
+  let scoreSession: ABCScoreSession
+  var showPlanningControls = true
+  private(set) var pendingPlannedScore: PlannedScore?
+  private var planningDocumentID: String?
+  private var planningDocumentRevision: Int?
   private let generate = WorkflowDraft(kind: .generate)
   private let plan = WorkflowDraft(kind: .plan)
   private let renderPlan = WorkflowDraft(kind: .renderPlan)
@@ -17,6 +23,12 @@ final class YueqinWorkspace {
   private let batch = WorkflowDraft(kind: .batch)
   private let prepare = WorkflowDraft(kind: .prepare)
   private let doctor = WorkflowDraft(kind: .doctor)
+
+  init() {
+    let document = ScoreDocument()
+    scoreDocument = document
+    scoreSession = ABCScoreSession(document: document)
+  }
 
   var kind: WorkflowKind { selection ?? .generate }
   var draft: WorkflowDraft { draft(for: kind) }
@@ -40,9 +52,14 @@ final class YueqinWorkspace {
       let submission = try draft.makeSubmission(settings: settings)
       draft.save()
       settings.save()
+      if kind == .plan {
+        planningDocumentID = scoreDocument.id
+        planningDocumentRevision = scoreDocument.revision
+      }
       runner.start(submission)
     } catch {
       inputError = error.localizedDescription
+      if kind == .plan { showPlanningControls = true }
     }
   }
 
@@ -54,6 +71,79 @@ final class YueqinWorkspace {
     next.save()
     selection = kind
     inputError = nil
+  }
+
+  func receivePlannedScore(_ score: PlannedScore) async {
+    do {
+      try await scoreSession.flush()
+      if scoreDocument.isDirty
+        || planningDocumentID != scoreDocument.id
+        || planningDocumentRevision != scoreDocument.revision
+      {
+        pendingPlannedScore = score
+        return
+      }
+      await openPlannedScore(score)
+    } catch {
+      pendingPlannedScore = score
+      scoreDocument.errorMessage = error.localizedDescription
+    }
+  }
+
+  func openPlannedScore(_ score: PlannedScore) async {
+    if await scoreDocument.replace(
+      abc: score.abc, sourceURL: score.outputURL.appendingPathComponent("score.abc"),
+      title: "Planned score", truncated: score.truncated)
+    {
+      pendingPlannedScore = nil
+      showPlanningControls = false
+    } else {
+      pendingPlannedScore = score
+    }
+  }
+
+  func newScore() async {
+    selection = .plan
+    await scoreDocument.newScore()
+    if scoreDocument.hasDocument { showPlanningControls = false }
+  }
+
+  func openScore() async {
+    selection = .plan
+    await scoreDocument.openScore()
+    if scoreDocument.hasDocument { showPlanningControls = false }
+  }
+
+  func useEditorScore() async {
+    guard !runner.isRunning else { return }
+    do {
+      try await scoreSession.flush()
+      guard scoreSession.canUseScore else {
+        scoreDocument.errorMessage =
+          "Resolve the score's compatibility issues before using it in a song."
+        return
+      }
+      // Snapshot the editor into a fresh request. Never modify saved plan tokens
+      // or render an old prefix while implying that it includes these edits.
+      var request = plan.request
+      request.scoreSource = "text"
+      request.abc = scoreDocument.abc
+      request.abcPath = ""
+      request.cot = "full"
+      if request.source == "file" {
+        request.overrideABC = true
+        request.overrideCot = true
+      }
+      generate.request = request
+      generate.outputPath = ""
+      generate.resume = false
+      generate.save()
+      scoreSession.command("stop")
+      selection = .generate
+      inputError = nil
+    } catch {
+      scoreDocument.errorMessage = error.localizedDescription
+    }
   }
 
   func openRequest() {
@@ -99,20 +189,40 @@ final class YueqinWorkspace {
 
 @MainActor
 final class YueqinAppDelegate: NSObject, NSApplicationDelegate {
-  weak var runner: RunController?
+  weak var workspace: YueqinWorkspace?
+  private var confirmingTermination = false
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard let runner, runner.isRunning else { return .terminateNow }
-    let alert = NSAlert()
-    alert.messageText = "Cancel the active workflow and quit?"
-    alert.informativeText =
-      "The engine will stop at its next checkpoint. Completed recordings are kept. An interrupted recording can be retried with matching resume settings."
-    alert.addButton(withTitle: "Keep Running")
-    alert.addButton(withTitle: "Cancel and Quit")
-    guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
-    guard runner.isRunning else { return .terminateNow }
-    runner.onIdle = { sender.reply(toApplicationShouldTerminate: true) }
-    runner.cancel()
+    guard let workspace else { return .terminateNow }
+    guard !confirmingTermination else { return .terminateLater }
+    confirmingTermination = true
+    Task { @MainActor [self] in
+      guard await workspace.scoreDocument.confirmReplacement() else {
+        confirmingTermination = false
+        sender.reply(toApplicationShouldTerminate: false)
+        return
+      }
+      let runner = workspace.runner
+      if runner.isRunning {
+        let alert = NSAlert()
+        alert.messageText = "Cancel the active workflow and quit?"
+        alert.informativeText =
+          "The engine will stop at its next checkpoint. Completed recordings are kept."
+        alert.addButton(withTitle: "Keep Running")
+        alert.addButton(withTitle: "Cancel and Quit")
+        guard alert.runModal() == .alertSecondButtonReturn else {
+          confirmingTermination = false
+          sender.reply(toApplicationShouldTerminate: false)
+          return
+        }
+      }
+      if runner.isRunning {
+        runner.onIdle = { sender.reply(toApplicationShouldTerminate: true) }
+        runner.cancel()
+      } else {
+        sender.reply(toApplicationShouldTerminate: true)
+      }
+    }
     return .terminateLater
   }
 }
@@ -125,16 +235,48 @@ struct YueqinApp: App {
   var body: some Scene {
     Window("Yueqin", id: "main") {
       ContentView(workspace: workspace)
-        .onAppear { appDelegate.runner = workspace.runner }
+        .background(ScoreWindowGuard(document: workspace.scoreDocument).frame(width: 0, height: 0))
+        .onAppear { appDelegate.workspace = workspace }
     }
     .defaultSize(width: 1220, height: 800)
     .windowResizability(.contentMinSize)
     .commands {
       CommandGroup(replacing: .newItem) {
-        Button("Open Request…") { workspace.openRequest() }
+        Button("New Score") { Task { await workspace.newScore() } }
+          .keyboardShortcut("n", modifiers: .command)
+        Button("Open ABC Score…") { Task { await workspace.openScore() } }
           .keyboardShortcut("o", modifiers: .command)
+        Button("Save Score") { Task { await workspace.scoreDocument.save() } }
+          .keyboardShortcut("s", modifiers: .command)
+          .disabled(!workspace.scoreDocument.hasDocument)
+        Button("Save Score As…") { Task { await workspace.scoreDocument.save(as: true) } }
+          .keyboardShortcut("s", modifiers: [.command, .shift])
+          .disabled(!workspace.scoreDocument.hasDocument)
+        Divider()
+        Button("Open Request…") { workspace.openRequest() }
+          .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(workspace.runner.isRunning)
         Button("Show Output Folder") { workspace.revealOutputs() }
+      }
+      CommandMenu("Score") {
+        Group {
+          Button("Undo Score Edit") { workspace.scoreDocument.undo() }
+            .disabled(!workspace.scoreDocument.canUndo)
+          Button("Redo Score Edit") { workspace.scoreDocument.redo() }
+            .disabled(!workspace.scoreDocument.canRedo)
+          Divider()
+          Button("Note Input") { workspace.scoreSession.command("input") }
+          Button("Select All in Voice") { workspace.scoreSession.command("selectAll") }
+          Button("Copy Notes") { workspace.scoreSession.command("copy") }
+          Button("Cut Notes to Rests") { workspace.scoreSession.command("cut") }
+          Button("Paste Notes") { workspace.scoreSession.receiveNative("paste") }
+          Divider()
+          Button("Preview Tones") { workspace.scoreSession.command("play") }
+          Button("Stop Preview") { workspace.scoreSession.command("stop") }
+          Button("ABC Source") { workspace.scoreSession.command("source") }
+          Button("Keyboard Reference") { workspace.scoreSession.command("help") }
+        }
+        .disabled(workspace.kind != .plan || !workspace.scoreDocument.hasDocument)
       }
       CommandMenu("Workflow") {
         Button(workspace.kind.actionTitle) { workspace.runActive() }

@@ -1,29 +1,57 @@
 <!doctype html>
 <html lang="en" data-theme="light">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
-    <title>ABC score</title>
-    <style>
-        :root { color-scheme: light; color: #202124; background: #ffffff; }
-        :root[data-theme="dark"] { color-scheme: dark; color: #eeeeef; background: #1c1c1e; }
-        * { box-sizing: border-box; }
-        html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
-        body { font-family: system-ui, sans-serif; }
-        #viewport { width: 100%; height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 16px; }
-        #score { display: flow-root; }
-        .tune { margin-bottom: 24px; }
-        .tune:last-child { margin-bottom: 0; }
-        .tune svg { color: inherit; }
-        #viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
-    </style>
-    <script src="abcjs-basic-min.js" defer></script>
-    <script src="ABCScoreRenderer.js" defer></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+<title>ABC score</title>
+<style>
+:root { color-scheme:light; color:#202124; background:#fff; --panel:#f4f4f6; --line:#d6d6dc; --accent:#5267d8; }
+:root[data-theme="dark"] { color-scheme:dark; color:#eeeef0; background:#1c1c1e; --panel:#28282c; --line:#45454c; --accent:#a5b3ff; }
+* { box-sizing:border-box; } html,body { margin:0; width:100%; height:100%; overflow:hidden; } body { font:12px system-ui,sans-serif; display:flex; flex-direction:column; }
+[hidden] { display:none !important; } button,input,select,textarea { font:inherit; color:inherit; } button,select,input { border:1px solid var(--line); border-radius:5px; background:var(--panel); padding:5px 7px; } button { cursor:pointer; white-space:nowrap; } button:hover { border-color:var(--accent); } button[aria-pressed="true"] { background:var(--accent); color:Canvas; } button:disabled { opacity:.4; cursor:default; } label { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; } input { width:66px; } summary { cursor:pointer; padding:6px; } :focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+#editor-toolbar { display:flex; align-items:center; gap:5px; padding:6px; overflow-x:auto; border-bottom:1px solid var(--line); flex-shrink:0; }
+#workspace { flex:1; min-height:0; display:flex; } #note-palette { width:46px; flex-shrink:0; padding:5px; display:flex; flex-direction:column; gap:5px; overflow-y:auto; border-right:1px solid var(--line); } #note-palette button { padding:5px 2px; } #viewport { flex:1; min-width:0; overflow:auto; scrollbar-gutter:stable; padding:12px; } #score { display:flow-root; } .tune { margin-bottom:24px; } .tune:last-child { margin-bottom:0; } .tune svg { color:inherit; } .score-selected { color:var(--accent); fill:var(--accent); } .score-playing { filter:drop-shadow(0 0 3px var(--accent)); }
+#note-palette [data-duration] { display:flex; align-items:center; justify-content:center; gap:2px; min-height:36px; } #note-palette svg { width:23px; height:28px; fill:currentColor; } .duration-key { font-size:9px; opacity:.65; }
+#editor-lower { flex-shrink:0; max-height:43%; overflow:auto; border-top:1px solid var(--line); background:var(--panel); } .row { display:flex; gap:6px; align-items:center; padding:5px 8px; flex-wrap:wrap; } #selection-info { font-weight:600; } #editor-notice { padding:4px 8px; min-height:22px; color:var(--accent); } #source-text { display:block; width:100%; min-height:130px; resize:vertical; background:Canvas; border:1px solid var(--line); font:12px ui-monospace,monospace; tab-size:4; } #compatibility-list { margin:5px 8px; padding-left:20px; } #compatibility-summary { padding:5px 8px; } #editor-help { padding:6px 10px; line-height:1.6; } #preview-label { font-size:10px; opacity:.75; } #chord-controls input { width:55px; } #section-name { width:100px; }
+@media(max-width:480px) { #viewport { padding:5px; } #note-palette { width:40px; padding:3px; } .row { gap:4px; } #editor-lower { max-height:38%; } }
+</style>
+<script src="abcjs-basic-min.js" defer></script>
+<script src="ABCScoreModel.js" defer></script>
+<script src="ABCScoreEditor.js" defer></script>
+<script src="ABCScoreRenderer.js" defer></script>
 </head>
 <body>
-    <main id="viewport" tabindex="0" aria-label="Scrollable music notation">
-        <div id="score"></div>
-    </main>
+<div id="editor-toolbar" hidden>
+<button id="note-input" aria-pressed="false" title="Enter or Shift-N">Note entry</button>
+<select id="entry-voice" aria-label="Entry voice"><option>Vocal</option><option>Ins</option></select>
+<button id="preview-button">Play</button><span id="preview-label">Preview tones — not generated audio</span>
+<button data-command="showCompatibility">Compatibility</button><button data-command="showSource">ABC repair</button>
+</div>
+<div id="workspace">
+<nav id="note-palette" aria-label="Note values and rhythm" hidden>
+<button data-duration="1/1" title="Whole note (8)" aria-label="Whole note (8)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="11" cy="23" rx="6" ry="3.5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="duration-key">8</span></button>
+<button data-duration="1/2" title="Half note (7)" aria-label="Half note (7)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="8" cy="24" rx="4.5" ry="2.8" transform="rotate(-20 8 24)" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 24V4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span class="duration-key">7</span></button>
+<button data-duration="1/4" title="Quarter note (6)" aria-label="Quarter note (6)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="8" cy="24" rx="4.5" ry="3" transform="rotate(-20 8 24)"/><path d="M12 24V4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span class="duration-key">6</span></button>
+<button data-duration="1/8" title="Eighth note (5)" aria-label="Eighth note (5)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="8" cy="24" rx="4.5" ry="3" transform="rotate(-20 8 24)"/><path d="M12 24V4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 4c1 5 10 5 6 15 1-8-6-8-6-11z"/></svg><span class="duration-key">5</span></button>
+<button data-duration="1/16" title="Sixteenth note (4)" aria-label="Sixteenth note (4)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="8" cy="24" rx="4.5" ry="3" transform="rotate(-20 8 24)"/><path d="M12 24V4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 4c1 5 10 5 6 15 1-8-6-8-6-11zM12 10c1 4 8 4 5 12 0-6-5-6-5-9z"/></svg><span class="duration-key">4</span></button>
+<button data-duration="1/32" title="Thirty-second note (3)" aria-label="Thirty-second note (3)"><svg viewBox="0 0 24 32" aria-hidden="true"><ellipse cx="8" cy="24" rx="4.5" ry="3" transform="rotate(-20 8 24)"/><path d="M12 24V2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 2c1 5 10 5 6 15 1-8-6-8-6-11zM12 7c1 4 8 4 5 12 0-6-5-6-5-9zM12 12c1 4 7 4 4 11 0-5-4-5-4-8z"/></svg><span class="duration-key">3</span></button>
+<button id="dot-button" title="Dotted duration (.)" aria-pressed="false">Dot</button><button data-command="rest" title="Replace with rest (Delete)">Rest</button><button data-command="tie" title="Tie (T)">Tie</button>
+</nav>
+<main id="viewport" tabindex="0" aria-label="Scrollable music notation"><div id="score"></div></main>
+</div>
+<section id="editor-lower" aria-label="Notation properties" hidden>
+<div class="row"><span id="selection-info">Select a note or rest</span><span id="entry-state"></span></div>
+<div class="row" id="pitch-controls"><span>Pitch</span><button data-pitch="C">C</button><button data-pitch="D">D</button><button data-pitch="E">E</button><button data-pitch="F">F</button><button data-pitch="G">G</button><button data-pitch="A">A</button><button data-pitch="B">B</button><label>Octave <input id="entry-octave" type="number" min="0" max="9" value="4"></label><select id="accidental" aria-label="Accidental"><option value="auto">Key signature</option><option value="natural">Natural</option><option value="sharp">Sharp</option><option value="flat">Flat</option><option value="doubleSharp">Double sharp</option><option value="doubleFlat">Double flat</option></select></div>
+<details id="properties-panel"><summary>Harmony, setup and bars</summary>
+<div class="row" id="chord-controls"><span>Vocal harmony</span><label>Root <input id="chord-root" value="C" aria-label="Chord root" placeholder="F#"></label><select id="chord-quality" aria-label="Chord quality"><option value="">Major</option><option>m</option><option>dim</option><option>aug</option><option>7</option><option>maj7</option><option>m7</option><option>dim7</option><option>m7b5</option><option>sus4</option><option>sus2</option><option>6</option><option>m6</option><option>7sus4</option><option>m(maj7)</option></select><label>Bass <input id="chord-bass" placeholder="Optional"></label><button id="apply-chord">Set chord</button><button data-command="chord" data-value="">Remove</button></div>
+<div class="row"><label>Key <input id="setup-key" value="C"></label><button id="apply-key" title="Preserves sounding pitches">Set key (keep pitches)</button><label>Meter <input id="setup-meter" value="4/4"></label><button id="apply-meter">Set meter</button><label>Quarter BPM <input id="setup-bpm" type="number" min="1" value="90"></label><button id="apply-bpm">Set tempo</button><label>Unit <input id="setup-unit" value="1/32"></label><button id="apply-unit">Set unit</button></div>
+<div class="row"><label>Bars <input id="bar-count" type="number" min="1" value="1"></label><button id="append-bars">Append</button><button id="insert-bars">Insert before</button><button data-command="duplicateBars">Duplicate selected bars</button><button data-command="deleteBars">Delete selected bars</button><label>Section <input id="section-name" value="verse"></label><button id="apply-section">Mark section</button></div>
+</details>
+<div id="editor-notice" role="status" aria-live="polite"></div>
+<details id="compatibility-panel"><summary>Model compatibility and repair</summary><div id="compatibility-summary"></div><ul id="compatibility-list"></ul><div class="row"><button data-command="repair">Repair missing rests / dangling ties</button><button data-command="adapt">Adapt simple ABC to two parts</button><span>Explicit changes only; unsupported music is never discarded.</span></div></details>
+<details id="source-panel"><summary>Advanced ABC source — edits apply immediately</summary><textarea id="source-text" spellcheck="false" aria-label="ABC source repair"></textarea></details>
+<details><summary>Keyboard help</summary><div id="editor-help">Click selects; Shift-click extends in one voice. Drag changes staff pitch. Left/Right moves selection; Shift extends. Up/Down changes staff pitch; +/− changes semitone. 3–8: thirty-second through whole. Period: dot. A–G: pitch. Enter / Shift-N: note entry (overwrites time and advances); Escape: select. R: rest entry. T: tie. Command-Z / Shift-Command-Z: undo / redo. Command-C / X / V: copy / cut / paste. Space: preview both parts from selection. Key changes keep sounding pitches.</div></details>
+</section>
 </body>
 </html>

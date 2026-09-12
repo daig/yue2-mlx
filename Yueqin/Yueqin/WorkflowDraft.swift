@@ -167,7 +167,11 @@ struct RequestDraft: Codable, Equatable, Sendable {
       }
     }
     if overrideABC {
-      try options.set("abc_file", absolutePath(abcPath, label: "ABC override file"))
+      if scoreSource == "text" {
+        try overrides.set("abc", abc)
+      } else {
+        try options.set("abc_file", absolutePath(abcPath, label: "ABC override file"))
+      }
     }
     if !overrides.fields.isEmpty { options.fields["overrides"] = try overrides.text() }
   }

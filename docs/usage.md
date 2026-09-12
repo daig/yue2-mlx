@@ -32,28 +32,36 @@ GUI verification is bounded functional smoke with real checkpoints: all seven wo
 
 ### Score workspace
 
-**Plan score** reserves the large, persistent right-hand pane for notation, with request settings and activity in a narrower, resizable left-hand column. Both columns stay within the window when resized; the score does not move into the results inspector or disappear when the request form scrolls. The placement is a working score surface for future editing, but currently provides only viewing, zoom and scrolling.
+**Plan score** gives notation the main workspace. The **Generation** toolbar control shows or hides the narrower request/activity column. Opening or creating a score hides that column so editing gets the available width.
 
-After successful planning, the application reads the actual saved `score.abc` as UTF-8 on the worker and presents it directly. The last score remains available during the app session when navigating or running another workflow. Replanning keeps the previous score visible and interactive until the replacement is loaded. Cancellation, failed planning or a score-loading error retains it with an explicit previous-score message, never presenting it as the new result. Token-limited notation carries a warning beside the score.
+Use **File → New Score** (Command-N), **Open ABC Score…** (Command-O), or generate a score with **Plan score**. Imports require lossless UTF-8 and are not silently normalized. **Save** (Command-S) initially chooses an edited copy; **Save As…** chooses another destination. Dirty documents prompt before replacement, closing or quitting. Later saves detect external file changes instead of overwriting them silently. Saving inside an integrity-protected plan folder is refused.
 
-An intentional `cot = off` plan has no notation and clears the previous score to the empty state; an unexpectedly missing or unreadable score reports a loading error instead. No plan files are rewritten. **Render this plan** still passes the intact plan folder to **Render plan**; file browsing belongs under **Advanced output**, not on the score surface.
+After successful planning, the editor opens the actual saved `score.abc`. If the current document was edited or replaced while planning, **Open new plan** lets you choose when to replace it. Cancellation, errors and score-off plans leave the current document intact. Token-limited notation is marked as potentially incomplete. Editing never rewrites a saved plan's ABC or token artifacts.
 
-Integration verification exercised the actual Xcode-built application in an isolated bundle: saved and model-generated ABC, cancellation, failed regeneration, retained-score navigation, valid score-off plans, hidden/expanded artifacts, render-plan handoff, zoom, appearances and window resizing. This is functional UI evidence, not numerical or performance acceptance.
+The editor follows the conservative [upstream ABC authoring dialect](../vendor/yue/skills/yue2-music/references/abc-editing.md): two monophonic **Vocal** and **Ins** parts, notes/rests, supported durations and ties, Vocal chord symbols, meter, key, tempo and section markers. This is an authoring boundary, not an engine-enforced whitelist or a promise of model adherence. General ABC may still engrave, but unsupported features remain flagged. **ABC repair** exposes the original source; **Adapt simple ABC to two parts** is an explicit, undoable conversion and refuses ambiguous or unsupported music.
+
+- Click a note/rest to select it; Shift-click extends within one part. Left/Right moves selection, Shift extends, Up/Down changes staff pitch, and +/− changes semitone. Dragging changes staff pitch.
+- **Note entry** (Enter or Shift-N) overwrites the selected time and advances. A–G enters pitch, R enters a rest, 3–8 chooses thirty-second through whole notes, period toggles a dot, and T toggles a tie. Entry past the last bar extends both parts. Escape returns to selection mode.
+- Use the lower **Harmony, setup and bars** panel for chord quality/slash bass, key/meter/tempo/unit, aligned bar insertion/deletion/duplication and sections. Key changes preserve sounding pitches.
+- Command-Z / Shift-Command-Z undo/redo. Command-C / X / V copy/cut/paste musical selections. The source field supports text editing with the same document undo history.
+- **Play** or Space previews local synthesized tones for both monophonic parts. It is not generated audio and does not synthesize the chord symbols.
+
+**Use in song** copies the current compatible ABC into a fresh **Generate song** request with full score conditioning. Review the request before running it. JSON-file requests retain their other fields and relative paths, with explicit ABC and mode overrides. **Render saved plan**, under **Advanced output**, instead renders the intact original plan; it does not include editor changes.
 
 ### Standalone ABC score component
 
-[`ABCScoreView`](../Yueqin/Yueqin/ABCScore/ABCScoreView.swift) is the reusable, read-only SwiftUI view embedded in the score workspace. It remains independent of the application's request and result models. Its only input is notation text:
+[`ABCScoreView`](../Yueqin/Yueqin/ABCScore/ABCScoreView.swift) remains usable as a read-only SwiftUI notation view without an editor session:
 
 ```swift
 ABCScoreView(abc: scoreText)
     .frame(minHeight: 360)
 ```
 
-The host owns file loading, editing, generation and placement. The component has no `LyraCore`, workspace or model dependency. It supplies native zoom controls (50–300%), fit-width reset, light/dark appearance, scrolling, empty/error presentation and a collapsible plain-text parser-warning panel. Multiple tunes and renderable portions of malformed input remain viewable. Parser warnings are not validation of musical correctness or generation fidelity.
+The host owns file loading, generation and placement. The component has no `LyraCore` dependency. It supplies native zoom controls (50–300%), fit-width reset, light/dark appearance, scrolling and empty/error presentation. Without a session, multiple tunes and renderable portions of malformed input remain viewable with plain-text parser warnings. An optional `ABCScoreSession`, backed by `ScoreDocument`, enables editing, versioned native synchronization, undo and save integration. Parser warnings and authoring compatibility are not guarantees of generation fidelity.
 
 Engraving preserves the source's staff-system breaks at abcjs's natural layout width; responsive SVG scaling fits the available space without re-parsing on resize, theme or zoom changes. Automatic line wrapping is deliberately disabled: it can misalign multi-voice scores containing multi-measure rests. Zoom enlarges the scrollable notation rather than changing the score's line breaks.
 
-The private `WKWebView` loads only bundled resources, uses a nonpersistent data store, blocks external navigation and network connections, and passes ABC as structured JavaScript arguments rather than interpolated HTML or executable code. Keep both Swift files in [`ABCScore/`](../Yueqin/Yueqin/ABCScore/) in the same target and package its four web/license resources in that target's bundle. Yueqin's existing filesystem-synchronized Xcode group includes them automatically. There is no notation editor, audio playback or online renderer in this component.
+The private `WKWebView` loads only bundled resources, uses a nonpersistent data store, blocks external navigation and network connections, and passes ABC as structured JavaScript arguments rather than interpolated HTML or executable code. Include the Swift files in [`ABCScore/`](../Yueqin/Yueqin/ABCScore/), `ScoreDocument.swift`, and the adjacent web/license resources in the target. Yueqin's filesystem-synchronized Xcode group includes them automatically. Engraving and the editor's optional Web Audio tone preview work offline.
 
 The unmodified bundled renderer is [abcjs 6.7.0](https://github.com/paulrosen/abcjs/tree/v6.7.0), distributed under its adjacent [MIT license](../Yueqin/Yueqin/ABCScore/abcjs-basic-min.js.LICENSE). `abcjs-basic-min.js` comes from the upstream tag's `dist/` directory; its SHA-256 is `b0cde4bc52bb33949181683a245005fff8a024a8c1f07ec6ce3222cd4bd72e51`.
 
