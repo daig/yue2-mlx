@@ -2,6 +2,34 @@
 
 Run shell commands from the repository root after completing the [native installation and model preparation](../README.md#quick-start). The shell examples assume `lyra` is on `PATH`, `MLX_ENABLE_TF32=0`, and `LYRA_VAE` was loaded with `plutil -extract vae raw -o - models/paths.json`. Production requires no Python environment. The seven commands are `prepare`, `doctor`, `generate`, `batch`, `plan`, `render-plan`, and `replay`. To create an editable request, copy `examples/full-song.json` to `request.json`; requests are UTF-8 JSON.
 
+## Yueqin macOS app
+
+Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as described in the [app setup](../README.md#yueqin-macos-app). The sidebar presents every native workflow; the right-hand **Activity & Results** inspector stays visible while navigating. Run the selected workflow with the labeled toolbar button or **Command-Return**. Execution is serial and off the UI thread. Cancel from the toolbar, inspector or **Command-Period**; quitting during execution offers to cancel and waits for the native worker to stop.
+
+### Models and output
+
+- **Prepare models** downloads or reuses the pinned source/VAE cache and converts the selected AR precision. Successful preparation updates the shared model paths. To reuse a CLI installation without another conversion, expand **Engine settings** and select its converted-model directory and local VAE directory.
+- **Diagnostics** checks readiness without downloading. Optional hash verification requires local model and VAE directories. An unready result retains its errors and complete report; readiness is not a quality or performance certification.
+- **Engine settings** exposes model/VAE identifiers or paths, converted directory, BF16/8-bit/4-bit precision, offline resolution, AC-power requirement and VAE core frames. Settings and per-workflow drafts persist locally. Blank numeric fields retain native defaults.
+- A blank recording output creates a unique directory under `~/Music/Yueqin`, or the configured default output folder. An explicit output must be new or empty. **Resume matching output** requires selecting the prior directory and keeps the native identity/receipt checks; it does not append to or overwrite an unrelated recording. Planning, rendering and replay create new outputs rather than resuming.
+- Filesystem fields accept absolute paths or `~/…`; native pickers avoid dependence on Xcode's or Finder's working directory. Preparation has its own converted-model output, and diagnostics has an optional JSON report file rather than a recording directory.
+
+### Requests and raw controls
+
+**Generate song** and **Plan score** can compose a request or submit a JSON file. Composed requests expose style, lyrics text/file, generated or supplied ABC, `cot` (`full`, `melody`, `off`), identifier, exact signed 64-bit seed and CFG scale. Advanced controls retain separate ABC/semantic temperature, top-p, top-k, repetition penalty/window and minimum/maximum tokens. Solver steps and the complete `generation_config` JSON object are available directly; a populated solver-steps field overrides `ode_steps` in that object. Composed requests can be exported as JSON.
+
+JSON-file mode passes the file path to the core without importing or rewriting it. Relative `lyrics_path` and `abc_path` still resolve beside that file. Only explicitly enabled file overrides are submitted; edit nested sampling and generation configuration in the original JSON. Switching between file and composed mode retains the composed draft.
+
+**Render plan** consumes a saved-plan directory. **Replay artifacts** consumes a saved-song directory and exposes `decode` and `synthesize`. The result inspector can hand a saved plan to rendering or a recording to replay, preserving the input and clearing the new output destination. **Batch** accepts JSONL, optional score-mode override and matching-output resume; failed rows remain visible alongside successful recordings.
+
+### Results
+
+The inspector shows native stages/counts, elapsed time, warnings, typed errors, truncation flags and batch-row outcomes. A token-limited run can complete without reaching the sequence's natural end. Files at a failed run's destination are not presented as proof of newly completed output.
+
+Play/pause and seek use native audio playback. **Export FLAC…** copies the original recording without re-encoding, staging beside the destination before an atomic replacement. Finder actions reveal artifacts; disclosures retain the exact submitted options and result JSON. Neither frontend adds memory caps or allocation guards.
+
+GUI verification is bounded functional smoke with real checkpoints: all seven workflows, both replay stages, a short recording, resume, partial batches, cancellation/recovery, readiness/error presentation and playback were exercised in a temporary native SwiftUI host. Native numerical fidelity, listening quality and performance acceptance remain deferred. System-hosted save-dialog acceptance was not completed by session automation; request serialization and FLAC creation/replacement/failure preservation were exercised separately.
+
 ## CLI generation
 
 A request is JSON. The smallest useful form is:
@@ -169,7 +197,7 @@ Generation, planning, rendering, replay and batch also accept `model`, `vae`, `c
 
 `WorkflowResult.json` retains the operation-specific payload. An unready doctor or partially failed batch returns `succeeded == false` with its diagnostics/results intact. Execution errors throw `EngineError` with `type`, `message` and numeric `status`; input errors use status 2 and cancellation uses 130. The CLI maps these states to its existing exit codes. Batch execution remains serial; `--concurrency 1`, aliases and `--quiet`/`--no-progress` are CLI presentation/argument concerns, not extra engine options.
 
-Optional `Engine(onEvent:)` receives owned JSON `Data` synchronously on the executing thread. Events include stage start/progress/completion, generation completion, batch rows, failures and warnings. Dispatch UI updates to the UI actor; do not re-enter `execute` from a callback. Omitting the callback avoids native progress serialization. See [cancellation and ownership](#cancellation-and-ownership) for lifecycle rules.
+Optional `Engine(onEvent:)` receives owned JSON `Data` synchronously on the executing thread. Events include workflow start, stage start/progress/completion, generation completion, batch rows, failures and warnings. Dispatch UI updates to the UI actor; do not re-enter `execute` from a callback. Omitting the callback avoids native progress serialization. See [cancellation and ownership](#cancellation-and-ownership) for lifecycle rules.
 
 The lower-level [C API](../native/include/CLyraCore/lyra.h) is also available. C++/C hosts must explicitly supply the `mlx.metallib` path through `configure_runtime`/context creation; the core never guesses from the host executable. Swift supplies its bundle resource automatically. C callbacks borrow their event string only for the callback; result/error strings belong to the caller and must be released with `lyra_string_free`.
 
@@ -252,6 +280,8 @@ Runtime identity now hashes the compiled native engine/MLX/JACCL archives (`core
 CLI interruption stops the current operation rather than treating partial artifacts as completed output. The CLI installs/restores its own SIGINT/SIGTERM handlers; embedding the core does not replace the host's handlers. Use matching `--resume` / `resume: true` for supported retries.
 
 Swift's `Engine.cancel()` is thread-safe and cooperatively cancels the active execution at engine checkpoints; it does not forcibly interrupt a running GPU kernel. Cancellation is reset for the next execution, including after an interrupted attempt. Concurrent calls on one engine are rejected, and callbacks must not re-enter it. C++ workflow callers supply `ExecutionContext.event` and `ExecutionContext.cancelled`; direct stage callers can install the same operation-local context with `ExecutionScope`. C++ callback exceptions are contained and request cancellation.
+
+The `workflow_started` event is delivered after the C/Swift per-call cancellation reset and before validation or workflow work. A frontend that allows cancellation while execution is still queued must retain that intent and reapply `cancel()` from this synchronous startup callback. Yueqin does this, so an immediate Cancel is not lost when the worker enters the core.
 
 One pipeline can retain weights between serial requests; concurrent calls are unsupported, and GPU execution ownership prevents competing Lyra workloads. `Pipeline::close` or destruction releases resident resources. Workflow calls manage their own pipeline/resource lifetime.
 

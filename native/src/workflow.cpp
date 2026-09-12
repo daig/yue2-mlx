@@ -635,9 +635,12 @@ WorkflowResult run(WorkflowOptions a) {
 WorkflowResult run_workflow(Operation operation, const Json &options,
                             const ExecutionContext &context) {
   ExecutionScope scope(context);
+  auto name = operation_name(operation);
+  if (context.event)
+    emit_event({{"type", "workflow_started"}, {"workflow", name}});
   check_cancelled();
   validate_options(operation, options);
-  auto result = run({operation_name(operation), options});
+  auto result = run({std::move(name), options});
   check_cancelled();
   return result;
 }

@@ -1,6 +1,6 @@
 # yue2-mlx
 
-Run [YuE2](https://huggingface.co/m-a-p/YuE2-3B) music generation locally on Apple Silicon. The production CLI is a C++20/Objective-C++ executable: native MLX 0.32.2 runs autoregressive planning and acoustic synthesis, and a native FP32 MPSGraph decoder renders audio. There is no Python entrypoint, subprocess fallback, or PyTorch runtime. After model preparation, generation works offline.
+Run [YuE2](https://huggingface.co/m-a-p/YuE2-3B) music generation locally on Apple Silicon through the **Yueqin macOS app** or the **Lyra CLI**. Both call the same C++20/Objective-C++ engine: native MLX 0.32.2 runs autoregressive planning and acoustic synthesis, and a native FP32 MPSGraph decoder renders audio. There is no Python entrypoint, subprocess fallback, or PyTorch runtime. After model preparation, generation works offline.
 
 **Experimental, reasoning-first native migration.** Initial native checks are bounded smoke execution, not numerical or performance parity acceptance. Historical BF16 generation, listening and numerical measurements below belong to the prior Python implementation. A comprehensive native fidelity/performance audit is explicitly deferred to user guidance. The project is independent of the upstream YuE team.
 
@@ -105,6 +105,21 @@ This is the Chinese City Pop example from the [retained acceptance corpus](valid
 
 **Historical Python measurement on the 32 GB M5 Air:** three sequential BF16 runs of this request produced naturally ended **179.719-second** songs in **13.6–15.1 minutes each**, with **12.63 GiB sampled peak process footprint** and no additional swap-outs. These are not native timing or memory results. The songs miss the unchanged strict 180-second harness cutoff by 0.281 seconds; they were not padded. Historical listening review is complete; the duration gate remains failed. See the [measurement summary](validation/mvp-results.json) and [validation provenance](validation/README.md).
 
+## Yueqin macOS app
+
+[`Yueqin/`](Yueqin/) is a native SwiftUI frontend for all seven shared workflows. It exposes the existing request, sampling and generation controls directly, with persisted drafts, native file pickers, live progress, cooperative cancellation, artifact inspection, FLAC playback and export. It calls `LyraCore` in-process, not the CLI.
+
+The Xcode application currently targets **macOS 26.3**. Install the native dependencies above, build the package artifacts, then open the project and run the **Yueqin** scheme:
+
+```bash
+cmake --build build --target lyra_swift_package -j 6
+open Yueqin/Yueqin.xcodeproj
+```
+
+Start with **Prepare models**, or expand **Engine settings** and select existing converted-model and VAE directories. Use **Diagnostics** to check readiness. **Generate song** accepts composed inputs or an existing request JSON file; **Plan score**, **Render plan**, **Replay artifacts** and **Batch** expose the corresponding native workflows. See the [GUI workflow guide](docs/usage.md#yueqin-macos-app).
+
+This is a local-development app, not a self-contained notarized distribution. It still links Homebrew libsndfile. App Sandbox is disabled for native filesystem/cache access and shared GPU ownership; Hardened Runtime remains enabled with library validation disabled for that external dependency.
+
 ## Shared native core and Swift package
 
 The CLI and local [`LyraCore` Swift package](Package.swift) call the same [`lyra::run_workflow`](native/include/lyra/workflow.hpp) implementation for `prepare`, `doctor`, `generate`, `batch`, `plan`, `render-plan`, and `replay`. Swift calls the core in-process through a C boundary; it does not launch the CLI or Python. The CLI owns argument parsing, terminal presentation and signal handling, not the workflows.
@@ -116,9 +131,9 @@ cmake --build build --target lyra_swift_package -j 6
 swift build -c release
 ```
 
-Add this repository as a local package dependency in Xcode and link the `LyraCore` product. The package contains a static native XCFramework and bundled `mlx.metallib`, not an installable Lyra dylib. Regenerate the package artifacts after native changes; generated binaries, resources and the Swift build-identity source are ignored by Git. The existing libsndfile dependency remains; self-contained app distribution and the GUI are not implemented in this refactor.
+Add this repository as a local package dependency in Xcode and link the `LyraCore` product; Yueqin already does this. The package contains a static native XCFramework and bundled `mlx.metallib`, not an installable Lyra dylib. Regenerate the package artifacts after native changes; generated binaries, resources and the Swift build-identity source are ignored by Git. The existing libsndfile dependency remains; self-contained app distribution is not implemented.
 
-[`lyra::Pipeline`](native/include/lyra/pipeline.hpp) remains available for independent `plan → generate_semantic → synthesize → decode` stages, end-to-end `generate`, saved-plan `render`, and explicit-noise synthesis. See the [shared workflow options, Swift API and cancellation contract](docs/usage.md#shared-workflows-and-swift-package). The eventual UI can expose the existing raw controls without inventing derived generation parameters.
+[`lyra::Pipeline`](native/include/lyra/pipeline.hpp) remains available for independent `plan → generate_semantic → synthesize → decode` stages, end-to-end `generate`, saved-plan `render`, and explicit-noise synthesis. See the [shared workflow options, Swift API and cancellation contract](docs/usage.md#shared-workflows-and-swift-package). Yueqin exposes the existing raw controls without inventing derived generation parameters.
 
 The old Python API lives under `oracle/port/lyra`. Root `pyproject.toml` and `uv.lock` are retained solely for this optional historical reference, with unchanged package/import names, Python version and dependencies, and no `project.scripts` CLI entrypoint. Use `uv sync --frozen` only when working with that reference API or its tests/tools; it is not an installation or execution requirement for native `lyra`.
 
@@ -137,7 +152,7 @@ The native implementation preserves the Torch-compatible CPU noise algorithm, 32
 - Four strict AR numerical comparisons remain outside their empirical bounds. They have not been waived for this release. Bounded NAR/VAE checks pass their recorded limits; the full-song NAR comparison is complete with one explicitly accepted FP32-anchor failure.
 - **BF16 is the MVP default.** Optional 8-bit/4-bit AR modes remain experimental pending listening. They retain BF16 acoustic conditioning and add weight files rather than shrinking the whole installation to one quarter.
 - The serial batch CLI, completed-result `--resume`, standalone `doctor`, and inline request overrides are available. Parallel batch execution is not supported.
-- Editing a score, style or lyrics regenerates audio; it is not waveform-preserving inpainting. Source-audio transcription, streaming, real-time guarantees, best-of-N selection and a native Mac GUI are outside this release.
+- Editing a score, style or lyrics regenerates audio; it is not waveform-preserving inpainting. Source-audio transcription, streaming, real-time guarantees and best-of-N selection are outside this release.
 
 For diagnostics, include the command, macOS/chip/memory information, exception and relevant stage timings in a [GitHub issue](https://github.com/daig/yue2-mlx/issues). Redact private lyrics, local paths and credentials before sharing reports.
 
