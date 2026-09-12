@@ -35,17 +35,31 @@ file(MAKE_DIRECTORY "${MLX_METAL_PATH}")
 FetchContent_Declare(mlx URL https://github.com/ml-explore/mlx/archive/refs/tags/v0.32.2.tar.gz DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(mlx)
 
+find_package(CURL REQUIRED)
+find_package(SndFile 1.2 CONFIG REQUIRED HINTS /opt/homebrew/opt/libsndfile/lib/cmake/SndFile)
 find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
 find_library(METAL_FRAMEWORK Metal REQUIRED)
+find_library(MPS_FRAMEWORK MetalPerformanceShaders REQUIRED)
+find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph REQUIRED)
 find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
 
 add_library(lyra_core STATIC
   native/src/protocol.mm
   native/src/storage.cpp
-  native/src/runtime.mm)
+  native/src/runtime.mm
+  native/src/conversion.cpp
+  native/src/ar.cpp
+  native/src/sampling.cpp
+  native/src/nar.cpp
+  native/src/nar_attention.cpp
+  native/src/vae.mm
+  native/src/audio.cpp
+  native/src/noise.cpp
+  native/src/artifacts.cpp)
 target_include_directories(lyra_core PUBLIC native/include)
 target_link_libraries(lyra_core PUBLIC mlx nlohmann_json::nlohmann_json
-  PRIVATE ${FOUNDATION_FRAMEWORK} ${METAL_FRAMEWORK} ${IOKIT_FRAMEWORK})
+  PRIVATE CURL::libcurl SndFile::sndfile ${FOUNDATION_FRAMEWORK}
+  ${METAL_FRAMEWORK} ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK} ${IOKIT_FRAMEWORK})
 target_compile_options(lyra_core PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>
   -Wall -Wextra -Wpedantic -ffp-contract=off)
