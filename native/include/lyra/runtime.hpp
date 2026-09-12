@@ -3,13 +3,11 @@
 #include <exception>
 #include <memory>
 namespace lyra {
-inline constexpr double DEFAULT_MEMORY_BUDGET_GIB = 16;
 void initialize_runtime();
 Json runtime_info();
 Json memory_snapshot();
 Json power_source();
 void check_cancelled();
-void check_metal_allocation(uint64_t bytes);
 bool cancellation_requested();
 double monotonic_seconds();
 class ResourceMonitor {
@@ -17,8 +15,7 @@ public:
   ResourceMonitor(bool require_ac = false,
                   const std::optional<fs::path> &log_path = std::nullopt,
                   const std::optional<fs::path> &report_path = std::nullopt,
-                  Json metadata = Json::object(),
-                  std::function<void(const Json &)> on_sample = {});
+                  Json metadata = Json::object());
   ~ResourceMonitor();
   void check() const;
   Json report() const;
@@ -31,8 +28,7 @@ private:
 };
 class GPUExecution {
 public:
-  GPUExecution(double budget_gib = DEFAULT_MEMORY_BUDGET_GIB,
-               bool require_ac = false);
+  explicit GPUExecution(bool require_ac = false);
   ~GPUExecution();
   void check() const;
   void close();

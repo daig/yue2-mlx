@@ -12,9 +12,9 @@ The repository is named `yue2-mlx`; the native command is **`lyra`**. The histor
 - **macOS 26.2 or newer**, Xcode command line tools and the Metal toolchain, **CMake 3.25 or newer**, Ninja, and **libsndfile 1.2**. No Python environment is required.
 - Internet access for initial build dependencies and approximately **7.8 GB of model downloads**. Model weights are downloaded from their pinned upstream Hugging Face repositories, not from this GitHub repository.
 - **At least 20 GB of free disk space** for a BF16 model setup. The original generator, converted copy and decoder occupy approximately **15.1 GB**, before build dependencies, caches and generated recordings. Allow additional space for the native build.
-- Connect AC power, close other memory-heavy workloads, and run only one generation at a time. The runtime enforces a sampled **16 GiB process budget**. Warning-level memory pressure alone is not fatal; critical pressure, insufficient memory headroom, or excessive new swapping stops the run.
+- Run only one generation at a time. Process memory, system pressure and swapping are recorded for observation; they do not automatically abort generation. Connect AC power when stable evaluation timing matters.
 
-The guard also preflights native decoder buffers and graph outputs; it is not a blanket MPSGraph hard allocation cap.
+There is no application-imposed memory budget or decoder allocation preflight cap. MLX uses its framework-default allocation policy; genuine allocation failures are still reported normally.
 
 ## Quick start
 

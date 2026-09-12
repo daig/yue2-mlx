@@ -23,7 +23,6 @@
  * PyTorch's BSD copyright/license notice is reproduced in noise.cpp.
  */
 #include "lyra/vae.hpp"
-#include "lyra/runtime.hpp"
 #include "lyra/storage.hpp"
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -146,14 +145,6 @@ struct GraphRun {
   }
   MPSGraphTensorData *run(id<MTLCommandQueue> queue,
                           MPSGraphTensorData *value = nil) {
-    uint64_t output_bytes = sizeof(float);
-    for (NSNumber *extent in output.shape) {
-      const auto dimension = extent.unsignedLongLongValue;
-      if (!dimension || output_bytes > UINT64_MAX / dimension)
-        throw Error("ValueError", "Invalid decoder graph output size");
-      output_bytes *= dimension;
-    }
-    check_metal_allocation(output_bytes);
     if (input)
       feeds[input] = value;
     auto compilation = [MPSGraphCompilationDescriptor new];
@@ -301,7 +292,6 @@ struct VAE::Impl {
     const auto &source = it->second;
     if (source.dims != expected)
       throw Error("ValueError", "VAE tensor shape mismatch: " + name);
-    check_metal_allocation(source.bytes);
     auto buffer = [device newBufferWithLength:source.bytes
                                       options:MTLResourceStorageModeShared];
     if (!buffer)
@@ -486,7 +476,6 @@ struct VAE::Impl {
                            int64_t right, const Cancelled &cancelled) {
     int64_t length = right - left;
     check_cancel(cancelled);
-    check_metal_allocation(length * latent_dim * sizeof(float));
     auto buffer =
         [device newBufferWithLength:length * latent_dim * sizeof(float)
                             options:MTLResourceStorageModeShared];

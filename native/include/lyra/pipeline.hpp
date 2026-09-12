@@ -10,7 +10,6 @@ struct PipelineOptions {
               precision = "bf16";
   fs::path converted_dir = "models/converted";
   bool offline = false, progress = true, require_ac = false;
-  double memory_budget_gib = DEFAULT_MEMORY_BUDGET_GIB;
   int vae_core_frames = 256, query_chunk_size = 256;
   GenerationConfig generation;
 };

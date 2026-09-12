@@ -43,8 +43,7 @@ Options options(const std::string &command) {
     value("cache-dir");
     return result;
   }
-  for (auto key : {"model", "vae", "converted-dir", "memory-budget-gib",
-                   "vae-core-frames"})
+  for (auto key : {"model", "vae", "converted-dir", "vae-core-frames"})
     value(key);
   flag("quiet");
   result["--no-progress"] = {"quiet", true};
@@ -190,9 +189,8 @@ Args parse(int argc, char **argv) {
   for (auto key : {"seed", "vae-core-frames", "concurrency"})
     if (a.has(key))
       integer(a.get(key), key);
-  for (auto key : {"memory-budget-gib", "cfg-scale"})
-    if (a.has(key))
-      number(a.get(key), key);
+  if (a.has("cfg-scale"))
+    number(a.get("cfg-scale"), "cfg-scale");
   auto choice = [&](std::string key, const std::set<std::string> &allowed) {
     if (a.has(key) && !allowed.contains(a.get(key)))
       throw UsageError("argument --" + key + ": invalid choice: '" +
@@ -286,9 +284,6 @@ PipelineOptions pipeline_options(const Args &a,
   o.offline = a.has("offline");
   o.progress = !a.quiet();
   o.require_ac = a.has("require-ac");
-  if (a.has("memory-budget-gib"))
-    o.memory_budget_gib =
-        number(a.get("memory-budget-gib"), "memory-budget-gib");
   if (a.has("vae-core-frames")) {
     try {
       o.vae_core_frames = std::stoi(a.get("vae-core-frames"));
@@ -305,10 +300,7 @@ ResourceMonitor monitor(const Args &a, const fs::path &output) {
       a.has("require-ac"), fs::path(output.string() + ".resources.jsonl"),
       fs::path(output.string() + ".resources.json"),
       {{"command", a.command},
-       {"memory_budget_gib",
-        a.has("memory-budget-gib")
-            ? number(a.get("memory-budget-gib"), "memory-budget-gib")
-            : DEFAULT_MEMORY_BUDGET_GIB},
+       {"memory_policy", "observe_only"},
        {"vae_core_frames", pipeline_options(a).vae_core_frames},
        {"precision", a.get("precision", "bf16")}});
 }

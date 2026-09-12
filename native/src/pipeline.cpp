@@ -24,8 +24,7 @@ Pipeline::Pipeline(PipelineOptions options) : options_(std::move(options)) {
         "ValueError",
         "Decoder core and attention query sizes must be positive integers");
   initialize_runtime();
-  execution_ = std::make_unique<GPUExecution>(options_.memory_budget_gib,
-                                              options_.require_ac);
+  execution_ = std::make_unique<GPUExecution>(options_.require_ac);
   const double started = monotonic_seconds();
   {
     Progress progress(options_.progress, "Resolving model files");
@@ -370,12 +369,12 @@ Json Pipeline::effective_config(const SongRequest &request,
       {"vae_halo_frames", 16},
       {"query_chunk_size", options_.query_chunk_size},
       {"device", "mps"},
-      {"memory_budget_gib", options_.memory_budget_gib},
+      {"memory_policy", "observe_only"},
       {"offload_ar", false},
       {"runtime_sha256", runtime_sha256_},
       {"runtime", runtime_},
       {"upstream_commit", UPSTREAM_COMMIT},
-      {"execution_guard", "GPUExecution"},
+      {"execution_context", "GPUExecution"},
       {"decoder_release", decoder_release_},
       {"rng",
        {{"ar", "request_local_mlx"}, {"acoustic", "torch_cpu_fp32_full_song"}}},

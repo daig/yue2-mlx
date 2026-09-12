@@ -32,12 +32,12 @@
 
 namespace lyra {
 namespace {
-constexpr uint64_t GiB = 1ULL << 30, MiB = 1ULL << 20;
+constexpr uint64_t MiB = 1ULL << 20;
 volatile sig_atomic_t interrupted = 0;
 std::atomic<bool> initialized = false;
 std::once_flag init_once;
 std::recursive_mutex gpu_mutex;
-std::vector<std::pair<const void *, double>> gpu_owners;
+std::vector<const void *> gpu_owners;
 std::vector<ResourceMonitor *> gpu_monitors;
 int gpu_fd = -1;
 std::mutex stderr_mutex;
@@ -147,28 +147,6 @@ void check_cancelled() {
   if (cancellation_requested())
     throw Error("InterruptedError", "Execution interrupted by signal " +
                                         std::to_string(interrupted));
-}
-void check_metal_allocation(uint64_t bytes) {
-  check_cancelled();
-  std::unique_lock lock(gpu_mutex, std::try_to_lock);
-  if (!lock.owns_lock() || gpu_owners.empty())
-    throw Error("RuntimeError",
-                "Metal allocation requires the active GPU execution guard");
-  for (auto *monitor : gpu_monitors)
-    monitor->check();
-  double budget = gpu_owners.front().second;
-  for (const auto &owner : gpu_owners)
-    budget = std::min(budget, owner.second);
-  const uint64_t limit = static_cast<uint64_t>((budget - 1) * GiB);
-  @autoreleasepool {
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    if (!device)
-      throw Error("RuntimeError", "Metal device unavailable during allocation");
-    const uint64_t allocated = device.currentAllocatedSize;
-    if (allocated > limit || bytes > limit - allocated)
-      throw Error("MemoryError",
-                  "Metal allocation exceeds the process GPU budget");
-  }
 }
 void initialize_runtime() {
   const char *precision = std::getenv("MLX_ENABLE_TF32");
@@ -351,7 +329,6 @@ struct ResourceMonitor::Impl {
   Json metadata, samples = Json::array(), power_start = nullptr,
                  power_end = nullptr, sampled_power = nullptr,
                  exception = nullptr;
-  std::function<void(const Json &)> callback;
   mutable std::mutex mutex;
   std::mutex wait_mutex;
   std::condition_variable wake;
@@ -359,10 +336,9 @@ struct ResourceMonitor::Impl {
   std::exception_ptr error;
   int log_fd = -1;
   double start = monotonic_seconds(), next_power = 5;
-  Impl(bool ac, std::optional<fs::path> report, Json meta,
-       std::function<void(const Json &)> cb)
+  Impl(bool ac, std::optional<fs::path> report, Json meta)
       : require_ac(ac), report_path(std::move(report)),
-        metadata(std::move(meta)), callback(std::move(cb)) {}
+        metadata(std::move(meta)) {}
   ~Impl() {
     if (log_fd >= 0)
       ::close(log_fd);
@@ -391,8 +367,6 @@ struct ResourceMonitor::Impl {
     if (require_ac && !sample.at("ac_connected").get<bool>())
       throw Error("RuntimeError",
                   "AC power disconnected during acceptance execution");
-    if (callback)
-      callback(sample);
   }
   Json report() const {
     std::lock_guard lock(mutex);
@@ -420,10 +394,8 @@ struct ResourceMonitor::Impl {
 };
 ResourceMonitor::ResourceMonitor(bool ac, const std::optional<fs::path> &log,
                                  const std::optional<fs::path> &report,
-                                 Json metadata,
-                                 std::function<void(const Json &)> callback)
-    : impl_(std::make_unique<Impl>(ac, report, std::move(metadata),
-                                   std::move(callback))) {
+                                 Json metadata)
+    : impl_(std::make_unique<Impl>(ac, report, std::move(metadata))) {
   auto &p = *impl_;
   try {
     for (const auto &path : {log, report})
@@ -553,46 +525,12 @@ void ResourceMonitor::close() {
 struct GPUExecution::Impl {
   std::unique_lock<std::recursive_mutex> lock{gpu_mutex, std::try_to_lock};
   std::unique_ptr<ResourceMonitor> monitor;
-  Json baseline = nullptr;
-  double budget;
   bool registered = false, closed = false, precision_verified = false;
-  explicit Impl(double b) : budget(b) {}
-  void sample(const Json &sample) {
-    if (baseline.is_null())
-      baseline = sample;
-    if (sample.at("physical_footprint_bytes").get<double>() > budget * GiB)
-      throw Error("MemoryError", "Process footprint exceeds " +
-                                     std::to_string(budget) + " GiB budget");
-    int pressure = sample.at("system_memory_pressure_level");
-    // Warning pressure alone is not evidence of an unsafe allocation. Keep
-    // monitoring the independent footprint, available-memory and swap limits.
-    if (pressure != 1 && pressure != 2)
-      throw Error("MemoryError",
-                  "System memory pressure is critical or unrecognized (level=" +
-                      std::to_string(pressure) + ")");
-    if (sample.at("system_available_bytes").get<uint64_t>() < 2 * GiB)
-      throw Error("MemoryError",
-                  "Less than 2 GiB of available system memory remains");
-    double swapped = sample.at("system_swap_out_bytes").get<double>() -
-                     baseline.at("system_swap_out_bytes").get<double>();
-    double growth = sample.at("system_swap_used_bytes").get<double>() -
-                    baseline.at("system_swap_used_bytes").get<double>();
-    if (swapped > 64 * MiB || growth > 128 * MiB)
-      throw Error("MemoryError",
-                  "Stopping GPU workload after new swapping: " +
-                      std::to_string(swapped / MiB) + " MiB out, " +
-                      std::to_string(growth / MiB) + " MiB used growth");
-  }
 };
-GPUExecution::GPUExecution(double budget, bool ac)
-    : impl_(std::make_unique<Impl>(budget)) {
+GPUExecution::GPUExecution(bool ac) : impl_(std::make_unique<Impl>()) {
   auto &p = *impl_;
   if (!p.lock.owns_lock())
     throw Error("RuntimeError", "Another thread owns Lyra GPU execution");
-  if (!std::isfinite(budget) || budget <= 5 ||
-      budget > sysctl_value<uint64_t>("hw.memsize") / double(GiB) - 4)
-    throw Error("ValueError",
-                "Memory budget must exceed 5 GiB and leave 4 GiB OS headroom");
   try {
     if (gpu_owners.empty()) {
       fs::path path = fs::temp_directory_path() /
@@ -616,30 +554,18 @@ GPUExecution::GPUExecution(double budget, bool ac)
             "Another Lyra process owns the GPU; run workloads serially");
       }
     }
-    gpu_owners.emplace_back(&p, budget);
+    gpu_owners.push_back(&p);
     p.registered = true;
     initialize_runtime();
-    double effective = budget;
-    for (const auto &owner : gpu_owners)
-      effective = std::min(effective, owner.second);
-    mlx::core::set_memory_limit(size_t((effective - 5) * GiB));
     mlx::core::set_cache_limit(128 * MiB);
-    Json metadata = {
-        {"gpu_backend", "mlx"},
-        {"memory_budget_gib", budget},
-        {"whole_process_limit_kind", "sampled"},
-        {"maximum_new_swap_out_bytes", 64 * MiB},
-        {"mlx_default_device", "gpu"},
-        {"mlx_advisory_memory_limit_bytes", size_t((effective - 5) * GiB)},
-        {"mlx_cache_limit_bytes", 128 * MiB},
-        {"mlx_tf32_enabled", false},
-        {"metal_allocation_limit_bytes", size_t((effective - 1) * GiB)},
-        {"metal_allocation_limit_kind",
-         "native decoder buffers and graph outputs; graph intermediates "
-         "additionally sampled"}};
+    Json metadata = {{"gpu_backend", "mlx"},
+                     {"memory_policy", "observe_only"},
+                     {"mlx_memory_policy", "framework_default"},
+                     {"mlx_default_device", "gpu"},
+                     {"mlx_cache_limit_bytes", 128 * MiB},
+                     {"mlx_tf32_enabled", false}};
     p.monitor = std::make_unique<ResourceMonitor>(
-        ac, std::nullopt, std::nullopt, metadata,
-        [&p](const Json &s) { p.sample(s); });
+        ac, std::nullopt, std::nullopt, std::move(metadata));
     gpu_monitors.push_back(p.monitor.get());
     static bool verified = false;
     if (!verified) {
@@ -686,8 +612,7 @@ void GPUExecution::check() const {
 Json GPUExecution::report() const {
   Json report = impl_->monitor ? impl_->monitor->report() : Json::object();
   report["gpu_backend"] = "mlx";
-  report["memory_budget_gib"] = impl_->budget;
-  report["maximum_new_swap_out_bytes"] = 64 * MiB;
+  report["memory_policy"] = "observe_only";
   report["metadata"]["mlx_fp32_precision_verified"] = impl_->precision_verified;
   return report;
 }
@@ -710,8 +635,7 @@ void GPUExecution::close() {
     std::erase(gpu_monitors, p.monitor.get());
   }
   if (p.registered) {
-    std::erase_if(gpu_owners,
-                  [&p](const auto &owner) { return owner.first == &p; });
+    std::erase(gpu_owners, &p);
     p.registered = false;
   }
   if (gpu_owners.empty() && gpu_fd >= 0) {
