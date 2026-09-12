@@ -43,7 +43,7 @@ find_library(MPS_FRAMEWORK MetalPerformanceShaders REQUIRED)
 find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph REQUIRED)
 find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
 
-add_library(lyra_core STATIC
+add_library(lyra_engine STATIC
   native/src/protocol.mm
   native/src/storage.cpp
   native/src/runtime.mm
@@ -57,18 +57,36 @@ add_library(lyra_core STATIC
   native/src/noise.cpp
   native/src/artifacts.cpp
   native/src/pipeline.cpp
-  native/src/cli.cpp)
-target_include_directories(lyra_core PUBLIC native/include)
-target_link_libraries(lyra_core PUBLIC mlx nlohmann_json::nlohmann_json
+  native/src/workflow.cpp
+  native/src/bridge.mm)
+target_include_directories(lyra_engine PUBLIC native/include)
+target_link_libraries(lyra_engine PUBLIC mlx nlohmann_json::nlohmann_json
   PRIVATE CURL::libcurl SndFile::sndfile ${FOUNDATION_FRAMEWORK}
   ${METAL_FRAMEWORK} ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK} ${IOKIT_FRAMEWORK})
-target_compile_options(lyra_core PRIVATE
+target_compile_options(lyra_engine PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>
   -Wall -Wextra -Wpedantic -ffp-contract=off)
-target_compile_definitions(lyra_core PUBLIC
+target_compile_definitions(lyra_engine PUBLIC
   LYRA_VERSION="${PROJECT_VERSION}" LYRA_MLX_VERSION="0.32.2")
-add_executable(lyra native/src/main.mm)
-target_compile_options(lyra PRIVATE -fobjc-arc)
+# The identity is derived from compiled core archives, not the embedding app.
+# Keep it outside the hashed archive to avoid a circular build dependency.
+set(CORE_IDENTITY_SOURCE "${CMAKE_BINARY_DIR}/core_identity.cpp")
+add_custom_command(OUTPUT "${CORE_IDENTITY_SOURCE}"
+  BYPRODUCTS "${CORE_IDENTITY_SOURCE}.sha256"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DCORE=$<TARGET_FILE:lyra_engine>"
+    "-DMLX=$<TARGET_FILE:mlx>"
+    "-DJACCL=$<TARGET_FILE:jaccl>"
+    "-DOUTPUT=${CORE_IDENTITY_SOURCE}"
+    -P "${CMAKE_SOURCE_DIR}/cmake/CoreIdentity.cmake"
+  DEPENDS lyra_engine mlx jaccl cmake/CoreIdentity.cmake
+  VERBATIM)
+add_library(lyra_build_identity STATIC "${CORE_IDENTITY_SOURCE}")
+add_library(lyra_core INTERFACE)
+target_link_libraries(lyra_core INTERFACE lyra_engine lyra_build_identity)
+
+add_executable(lyra native/src/main.mm native/src/cli.cpp native/src/terminal.cpp)
+target_compile_options(lyra PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 target_link_libraries(lyra PRIVATE lyra_core)
 set_target_properties(lyra PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
@@ -82,3 +100,24 @@ install(DIRECTORY vendor/yue/licenses/ native/licenses/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses COMPONENT lyra)
 install(FILES "${mlx_SOURCE_DIR}/LICENSE"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/lyra/licenses RENAME MLX-MIT.txt COMPONENT lyra)
+
+# A local Swift package consumes the same static core and pinned MLX build.
+# No shared Lyra library is installed; only the CLI retains an install target.
+find_program(XCRUN_EXECUTABLE xcrun REQUIRED)
+add_custom_target(lyra_swift_package
+  COMMAND "${CMAKE_COMMAND}"
+    "-DXCRUN=${XCRUN_EXECUTABLE}"
+    "-DCORE=$<TARGET_FILE:lyra_engine>"
+    "-DIDENTITY=$<TARGET_FILE:lyra_build_identity>"
+    "-DBUILD_ID=${CORE_IDENTITY_SOURCE}.sha256"
+    "-DMLX=$<TARGET_FILE:mlx>"
+    "-DJACCL=$<TARGET_FILE:jaccl>"
+    "-DWORK=${CMAKE_BINARY_DIR}/swift-package"
+    "-DPACKAGE=${CMAKE_SOURCE_DIR}/native/swift"
+    "-DHEADERS=${CMAKE_SOURCE_DIR}/native/include/CLyraCore"
+    "-DMETALLIB=${MLX_METAL_PATH}/mlx.metallib"
+    "-DMLX_LICENSE=${mlx_SOURCE_DIR}/LICENSE"
+    "-DROOT=${CMAKE_SOURCE_DIR}"
+    -P "${CMAKE_SOURCE_DIR}/cmake/SwiftPackage.cmake"
+  DEPENDS lyra_core mlx jaccl
+  VERBATIM)

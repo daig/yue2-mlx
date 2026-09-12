@@ -1,0 +1,5 @@
+module CSndFile [system] {
+    header "shim.h"
+    link "sndfile"
+    export *
+}

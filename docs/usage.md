@@ -125,6 +125,54 @@ Example fields to merge into a complete request JSON:
 }
 ```
 
+## Shared workflows and Swift package
+
+[`lyra::run_workflow`](../native/include/lyra/workflow.hpp) owns the same seven operations used by the CLI. Its inputs are an `Operation`, a JSON options object and an optional `ExecutionContext`; its result contains the operation's JSON payload and `succeeded`. The CMake `lyra_core` target supplies the native engine and build identity to C++ consumers. CLI argument aliases, terminal rendering, exit codes and signal handlers stay in the terminal frontend.
+
+The root [`Package.swift`](../Package.swift) exposes the `LyraCore` library product for macOS ≥26.2. Build its native inputs before resolving the local package in Xcode or SwiftPM:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target lyra_swift_package -j 6
+swift build -c release
+```
+
+Add the repository as a local package dependency and link `LyraCore`. CMake uses the same pinned MLX 0.32.2 sources as the CLI, merges the native static archives into `CLyraCore.xcframework`, and copies `mlx.metallib` and license notices into the Swift resource bundle. There is no installed Lyra dylib, CLI subprocess or Python runtime. `CSndFile` resolves the existing Homebrew libsndfile dependency through pkg-config; standalone app dependency bundling is deferred.
+
+Regenerate `lyra_swift_package` after native changes, then rebuild the Swift client. The generated `NativeBuild.swift` identity is a Swift compiler input so native-only rebuilds also relink clients; initialization rejects mismatched Swift/native builds. Generated XCFrameworks, resources and that identity source are not checked in. Normal Swift-only changes use SwiftPM directly.
+
+[`Engine`](../native/swift/LyraCore/Engine.swift) exposes `.prepare`, `.generate`, `.plan`, `.renderPlan`, `.replay`, `.batch` and `.doctor`. `execute` is synchronous; schedule generation on a worker, not the UI actor. For example, a non-UI caller can inspect readiness without downloading models:
+
+```swift
+import LyraCore
+
+let engine = try Engine()
+let report = try engine.execute(.doctor)
+print(String(decoding: report.json, as: UTF8.self))
+```
+
+Pass options as UTF-8 JSON `Data`, not command-line arguments. Integer seeds remain exact; encode them as integers rather than converting them through `Double`. Request JSON, sampling controls, generation configuration and defaults are the existing CLI contract:
+
+| Workflow | Operation options |
+|---|---|
+| `prepare` | `source`, `output`, `cache_dir`, `precision`, `offline` |
+| `generate` | `request` object or `request_file` path, `overrides`, `lyrics_file`, `abc_file`, `output`, `resume` |
+| `plan` | Same request inputs as `generate`, plus `output`; no resume |
+| `renderPlan` | `input` saved-plan directory and `output` directory, both required |
+| `replay` | `input` saved-song directory and `output` directory, both required; `stage` is `decode` (default) or `synthesize` |
+| `batch` | Required `input` JSONL path, `output`, `resume`, and optional `overrides` for the batch's request fields, including `cot` |
+| `doctor` | `model` (or `converted_dir`), `vae`, `precision`, `verify_hashes`, optional report-file `output` |
+
+Generation, planning, rendering, replay and batch also accept `model`, `vae`, `converted_dir`, `precision` (`bf16`, `8bit`, `4bit`), `offline`, `require_ac` and `vae_core_frames`. These are native values: booleans and integers are not flag strings. `doctor` never downloads models; hash verification requires local converted-model and VAE directories.
+
+`request` and `request_file` are mutually exclusive. `overrides` accepts `id`, `style`, `lyrics`, integer `seed`, numeric `cfg_scale`, and `cot` (`full`, `melody`, `off`). File overrides take precedence over request content. Relative `lyrics_path` and `abc_path` inside a request file or batch row resolve against that file's directory; inline requests use the working directory. Explicit `lyrics_file`/`abc_file` paths also use the working directory. Prefer absolute filesystem paths in GUI clients. Nested `generation_config`, `abc_sampling` and `semantic_sampling` stay in the request; they are not new derived controls.
+
+`WorkflowResult.json` retains the operation-specific payload. An unready doctor or partially failed batch returns `succeeded == false` with its diagnostics/results intact. Execution errors throw `EngineError` with `type`, `message` and numeric `status`; input errors use status 2 and cancellation uses 130. The CLI maps these states to its existing exit codes. Batch execution remains serial; `--concurrency 1`, aliases and `--quiet`/`--no-progress` are CLI presentation/argument concerns, not extra engine options.
+
+Optional `Engine(onEvent:)` receives owned JSON `Data` synchronously on the executing thread. Events include stage start/progress/completion, generation completion, batch rows, failures and warnings. Dispatch UI updates to the UI actor; do not re-enter `execute` from a callback. Omitting the callback avoids native progress serialization. See [cancellation and ownership](#cancellation-and-ownership) for lifecycle rules.
+
+The lower-level [C API](../native/include/CLyraCore/lyra.h) is also available. C++/C hosts must explicitly supply the `mlx.metallib` path through `configure_runtime`/context creation; the core never guesses from the host executable. Swift supplies its bundle resource automatically. C callbacks borrow their event string only for the callback; result/error strings belong to the caller and must be released with `lyra_string_free`.
+
 ## Native API and independent stages
 
 The C++20 interface is [`lyra::Pipeline`](../native/include/lyra/pipeline.hpp), configured with `PipelineOptions`. It uses native MLX 0.32.2 for AR/NAR and native FP32 MPSGraph for decoding, with no PyTorch runtime.
@@ -197,9 +245,15 @@ A saved plan contains `plan.json`, `plan_manifest.json`, `abc_tokens.npy`, `pref
 
 `result.json` hashes every other artifact and records request/configuration/weight identity, stage timings, sample rate, duration, and separate truncation flags. `config.json` records effective sampling/CFG, backend and dtypes, geometry, RNG policy, runtime versions/hash, source commit, and decoder release. `weights` includes the complete conversion manifest for the generator and the verified VAE identity. A `status` of `complete` means the requested operation finished; it does not override `truncated.abc` or `truncated.semantic`.
 
+Runtime identity now hashes the compiled native engine/MLX/JACCL archives (`core_build_sha256`) and Metal library (`metallib_sha256`), not the CLI or Swift host executable. Matching builds can resume each other's completed results. Resume remains strict: a changed native build or an older executable-based identity can require a new output directory. Saved plans, recordings and replay retain their existing formats.
+
 ## Cancellation and ownership
 
-CLI interruption stops the current operation rather than treating partial artifacts as completed output. Use matching `--resume` for supported retries. One pipeline can retain weights between serial requests; concurrent calls are unsupported, and GPU execution ownership prevents competing Lyra workloads. `Pipeline::close` or destruction releases resident resources. The native public stage interface does not expose the historical Python token-callback/cancellation-callable API.
+CLI interruption stops the current operation rather than treating partial artifacts as completed output. The CLI installs/restores its own SIGINT/SIGTERM handlers; embedding the core does not replace the host's handlers. Use matching `--resume` / `resume: true` for supported retries.
+
+Swift's `Engine.cancel()` is thread-safe and cooperatively cancels the active execution at engine checkpoints; it does not forcibly interrupt a running GPU kernel. Cancellation is reset for the next execution, including after an interrupted attempt. Concurrent calls on one engine are rejected, and callbacks must not re-enter it. C++ workflow callers supply `ExecutionContext.event` and `ExecutionContext.cancelled`; direct stage callers can install the same operation-local context with `ExecutionScope`. C++ callback exceptions are contained and request cancellation.
+
+One pipeline can retain weights between serial requests; concurrent calls are unsupported, and GPU execution ownership prevents competing Lyra workloads. `Pipeline::close` or destruction releases resident resources. Workflow calls manage their own pipeline/resource lifetime.
 
 ## Faithful execution and memory geometry
 

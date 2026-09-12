@@ -27,6 +27,11 @@ secrets.json
 
 # Build, coverage, and tool caches
 build/
+.build/
+.swiftpm/
+native/swift/Artifacts/
+native/swift/LyraCore/Resources/
+native/swift/LyraCore/NativeBuild.swift
 wheelhouse/
 .hatch/
 .hypothesis/

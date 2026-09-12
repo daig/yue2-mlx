@@ -2,7 +2,6 @@
 #include "lyra/conversion.hpp"
 #include "lyra/storage.hpp"
 #include <cmath>
-#include <iostream>
 
 namespace lyra {
 namespace {
@@ -85,7 +84,7 @@ Pipeline::~Pipeline() {
   try {
     close();
   } catch (const std::exception &error) {
-    std::cerr << "Pipeline cleanup failed: " << error.what() << '\n';
+    report_diagnostic(std::string("Pipeline cleanup failed: ") + error.what());
   }
 }
 
@@ -433,14 +432,11 @@ SongResult Pipeline::generate(const SongRequest &request,
   auto result =
       render_with_config(symbolic, semantic_sampling, std::move(config),
                          std::move(stamp), started);
-  if (options_.progress) {
-    std::cerr << "Generated " << static_cast<double>(result.audio.rows) / 48000
-              << " seconds of audio in "
-              << result.timing["e2e_seconds"].get<double>() << " seconds";
-    if (result.semantic.truncated || result.semantic.plan.truncated)
-      std::cerr << " (truncated)";
-    std::cerr << '\n';
-  }
+  emit_event({{"type", "generation_completed"},
+              {"audio_seconds", static_cast<double>(result.audio.rows) / 48000},
+              {"elapsed_seconds", result.timing["e2e_seconds"]},
+              {"truncated",
+               result.semantic.truncated || result.semantic.plan.truncated}});
   execution_->check();
   return result;
 }

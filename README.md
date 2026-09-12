@@ -105,9 +105,20 @@ This is the Chinese City Pop example from the [retained acceptance corpus](valid
 
 **Historical Python measurement on the 32 GB M5 Air:** three sequential BF16 runs of this request produced naturally ended **179.719-second** songs in **13.6–15.1 minutes each**, with **12.63 GiB sampled peak process footprint** and no additional swap-outs. These are not native timing or memory results. The songs miss the unchanged strict 180-second harness cutoff by 0.281 seconds; they were not padded. Historical listening review is complete; the duration gate remains failed. See the [measurement summary](validation/mvp-results.json) and [validation provenance](validation/README.md).
 
-## Native stages and optional reference API
+## Shared native core and Swift package
 
-[`lyra::Pipeline`](native/include/lyra/pipeline.hpp) exposes `plan → generate_semantic → synthesize → decode`, plus end-to-end `generate` and saved-plan `render`. `PipelineOptions` controls model paths, precision, offline operation, generation configuration and resource/tiling settings. `synthesize` accepts explicit CPU FP32 noise for exact-input replay. The CLI exposes `prepare`, `doctor`, `generate`, `batch`, `plan`, `render-plan`, and `replay`; see the [usage reference](docs/usage.md).
+The CLI and local [`LyraCore` Swift package](Package.swift) call the same [`lyra::run_workflow`](native/include/lyra/workflow.hpp) implementation for `prepare`, `doctor`, `generate`, `batch`, `plan`, `render-plan`, and `replay`. Swift calls the core in-process through a C boundary; it does not launch the CLI or Python. The CLI owns argument parsing, terminal presentation and signal handling, not the workflows.
+
+After configuring CMake as above, build the package's native artifacts:
+
+```bash
+cmake --build build --target lyra_swift_package -j 6
+swift build -c release
+```
+
+Add this repository as a local package dependency in Xcode and link the `LyraCore` product. The package contains a static native XCFramework and bundled `mlx.metallib`, not an installable Lyra dylib. Regenerate the package artifacts after native changes; generated binaries, resources and the Swift build-identity source are ignored by Git. The existing libsndfile dependency remains; self-contained app distribution and the GUI are not implemented in this refactor.
+
+[`lyra::Pipeline`](native/include/lyra/pipeline.hpp) remains available for independent `plan → generate_semantic → synthesize → decode` stages, end-to-end `generate`, saved-plan `render`, and explicit-noise synthesis. See the [shared workflow options, Swift API and cancellation contract](docs/usage.md#shared-workflows-and-swift-package). The eventual UI can expose the existing raw controls without inventing derived generation parameters.
 
 The old Python API lives under `oracle/port/lyra`. Root `pyproject.toml` and `uv.lock` are retained solely for this optional historical reference, with unchanged package/import names, Python version and dependencies, and no `project.scripts` CLI entrypoint. Use `uv sync --frozen` only when working with that reference API or its tests/tools; it is not an installation or execution requirement for native `lyra`.
 

@@ -3,7 +3,33 @@
 #include <exception>
 #include <memory>
 namespace lyra {
+// Callbacks run synchronously on the operation thread and are serialized.
+// They must not throw or reenter Lyra. A throwing callback cancels this scope.
+// Captured callback state must remain alive until run_workflow returns.
+struct ExecutionContext {
+  std::function<void(const Json &)> event;
+  Cancelled cancelled;
+  bool progress = true;
+};
+class ExecutionScope {
+public:
+  explicit ExecutionScope(const ExecutionContext &context);
+  ~ExecutionScope();
+  ExecutionScope(const ExecutionScope &) = delete;
+  ExecutionScope &operator=(const ExecutionScope &) = delete;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+void emit_event(const Json &event);
+void report_diagnostic(std::string message) noexcept;
+// Frontends supply the packaged MLX asset explicitly. Once MLX is configured,
+// only the same resolved path may be supplied again.
+void configure_runtime(const fs::path &metallib);
 void initialize_runtime();
+// Digest of the compiled core and pinned native dependency archives.
+const char *core_build_sha256();
 Json runtime_info();
 Json memory_snapshot();
 Json power_source();

@@ -12,7 +12,7 @@ This is a reasoning-first migration with bounded native smoke execution. Compreh
 - **Native FP32 MPSGraph VAE.** Preserve decoder geometry, halo/crop behavior and full FP32 arithmetic without Python or Torch execution.
 - **BF16 fidelity baseline first; evaluate 8-bit AR, then 4-bit.** Keep BF16 KV and BF16 NAR initially. Quantized quality/default selection remains an empirical decision.
 - Reuse fast GQA attention, RMSNorm/RoPE, quantized linears, compilation and reusable buffers. Custom Metal only for measured remaining hotspots. No Core ML/ANE-first design; M5 GPU Neural Accelerators are separate hardware and already accessible through MLX.
-- Native Swift/GUI packaging is deferred. Additional Apple Silicon configurations require their own validation; the currently validated hardware target is the 32 GB M5 Air, with macOS ≥26.2.
+- **Shared core, thin frontends.** CLI workflows live in `lyra::run_workflow`; the local `LyraCore` Swift package links the same native implementation through a static XCFramework and bundles its Metal resource. It does not invoke the CLI or install a shared Lyra dylib. SwiftUI implementation remains deferred; the fresh `Yueqin/` template is not an existing UI contract. Additional Apple Silicon configurations require their own validation; the currently validated hardware target is the 32 GB M5 Air, with macOS ≥26.2.
 
 ## Scope and provenance
 
@@ -23,6 +23,7 @@ This is a reasoning-first migration with bounded native smoke execution. Compreh
 - Default listening decoder: `YuE2-Vae`. Benchmark decoder: `YuE2-Vae-legacy`; never silently substitute it.
 - **Licenses:** code Apache-2.0; generator/VAE weights CC BY-NC 4.0. Do not assume commercial rights or omit upstream/third-party notices when reusing code.
 - Native build prerequisites: Xcode command line tools and Metal toolchain, CMake ≥3.25, Ninja and libsndfile 1.2. The installed layout is `bin/lyra` with relative `../lib/mlx.metallib`; libsndfile is a native runtime dependency. Root `pyproject.toml` / `uv.lock` are optional reference-only tooling, installed with `uv sync --frozen`, not CLI requirements; there is no `project.scripts`. Their historical Python 3.12, MLX 0.32.2, MLX-LM 0.31.3, PyTorch 2.10.0 and Transformers 5.0.0 pins remain for reference compatibility. The separate upstream oracle uses PyTorch 2.11.0 / Transformers 4.57.6. Historical local measurements used macOS 26.3.
+- Shared-core verification is bounded functional smoke, not a new fidelity/performance audit: all seven workflows ran directly from a separate Swift executable and through the CLI; checks covered progress, cross-thread cancellation and retry, host signal ownership, per-row batch failures, cross-frontend resume and native-only incremental package relinking. Numerical and memory-policy invariants are unchanged.
 - **Subsequent oracle correction:** use the locked PyTorch 2.11.0 reference environment for real-checkpoint validation. PyTorch 2.10 MPS two-pass BF16/fp16 attention has a scratch-buffer memory-corruption defect ([fix #174945](https://github.com/pytorch/pytorch/pull/174945)). The historical random-weight measurements below are not a validated reference. See [`validation/README.md`](validation/README.md) for current environments and evidence.
 
 ## Architecture invariants and traps

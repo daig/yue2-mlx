@@ -9,21 +9,15 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
-#include <iomanip>
 #include <libproc.h>
-#include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mlx/backend/metal/metal.h>
 #include <mlx/mlx.h>
 #include <mutex>
-#include <signal.h>
-#include <sstream>
 #include <sys/file.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/utsname.h>
@@ -33,15 +27,17 @@
 namespace lyra {
 namespace {
 constexpr uint64_t MiB = 1ULL << 20;
-volatile sig_atomic_t interrupted = 0;
 std::atomic<bool> initialized = false;
 std::once_flag init_once;
 std::recursive_mutex gpu_mutex;
 std::vector<const void *> gpu_owners;
 std::vector<ResourceMonitor *> gpu_monitors;
 int gpu_fd = -1;
-std::mutex stderr_mutex;
-void interrupt_handler(int signal) { interrupted = signal; }
+struct ExecutionState {
+  ExecutionContext context;
+  bool callback_active = false, callback_failed = false;
+};
+thread_local ExecutionState *execution_state = nullptr;
 [[noreturn]] void os_error(const std::string &operation) {
   throw Error("OSError", operation + ": " + std::strerror(errno));
 }
@@ -64,10 +60,6 @@ std::string error_text(std::exception_ptr error) {
   } catch (...) {
     return "RuntimeError: Unknown native exception";
   }
-}
-void diagnostic(const std::string &text) noexcept {
-  std::lock_guard lock(stderr_mutex);
-  std::fprintf(stderr, "lyra: %s\n", text.c_str());
 }
 int exclusive_file(const fs::path &path) {
   if (!path.parent_path().empty())
@@ -95,41 +87,26 @@ void write_fd(int fd, std::string_view data) {
     data.remove_prefix(n);
   }
 }
-std::string ascii(std::string value) {
-  for (auto &c : value)
-    if (c < ' ' || c > '~')
-      c = ' ';
-  return value;
-}
-const fs::path &executable_path() {
-  static const fs::path path = [] {
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> bytes(size);
-    if (_NSGetExecutablePath(bytes.data(), &size))
-      throw Error("OSError", "Cannot locate native executable");
-    return fs::canonical(bytes.data());
-  }();
-  return path;
-}
-const fs::path &metallib_path() {
-  static const fs::path path =
-      executable_path().parent_path().parent_path() / "lib" / "mlx.metallib";
-  return path;
+std::mutex asset_mutex;
+fs::path asset_path;
+bool asset_configured = false;
+fs::path metallib_path() {
+  std::lock_guard lock(asset_mutex);
+  return asset_path;
 }
 void configure_metallib() {
-  static std::once_flag configured;
-  std::call_once(configured, [] {
-    if (!fs::is_regular_file(metallib_path()))
-      throw Error("FileNotFoundError",
-                  "Required native MLX kernel asset is missing: " +
-                      metallib_path().string());
-    mlx::core::metal::set_metallib_path(metallib_path().string());
-  });
-}
-const std::string &executable_hash() {
-  static const std::string hash = sha256_file(executable_path());
-  return hash;
+  std::lock_guard lock(asset_mutex);
+  if (asset_configured)
+    return;
+  if (asset_path.empty())
+    throw Error("FileNotFoundError",
+                "MLX kernel asset has not been configured by the frontend");
+  if (!fs::is_regular_file(asset_path))
+    throw Error("FileNotFoundError",
+                "Required native MLX kernel asset is missing: " +
+                    asset_path.string());
+  mlx::core::metal::set_metallib_path(asset_path.string());
+  asset_configured = true;
 }
 const std::string &metallib_hash() {
   static const std::string hash = sha256_file(metallib_path());
@@ -137,16 +114,79 @@ const std::string &metallib_hash() {
 }
 } // namespace
 
+void configure_runtime(const fs::path &metallib) {
+  if (metallib.empty())
+    throw Error("ValueError", "MLX kernel asset path must not be empty");
+  auto resolved = fs::weakly_canonical(fs::absolute(metallib));
+  std::lock_guard lock(asset_mutex);
+  if (asset_configured && resolved != asset_path)
+    throw Error(
+        "RuntimeError",
+        "Cannot change the MLX kernel asset after runtime configuration");
+  asset_path = std::move(resolved);
+}
+
+struct ExecutionScope::Impl {
+  ExecutionState state;
+  ExecutionState *previous;
+  explicit Impl(const ExecutionContext &context)
+      : state{context}, previous(execution_state) {
+    if (previous && previous->callback_active)
+      throw Error("RuntimeError", "Lyra callbacks must not reenter execution");
+    execution_state = &state;
+  }
+  ~Impl() { execution_state = previous; }
+};
+ExecutionScope::ExecutionScope(const ExecutionContext &context)
+    : impl_(std::make_unique<Impl>(context)) {}
+ExecutionScope::~ExecutionScope() = default;
+void emit_event(const Json &event) {
+  auto *state = execution_state;
+  if (!state || !state->context.event || state->callback_failed ||
+      state->callback_active)
+    return;
+  state->callback_active = true;
+  try {
+    state->context.event(event);
+  } catch (...) {
+    state->callback_failed = true;
+  }
+  state->callback_active = false;
+}
+void report_diagnostic(std::string message) noexcept {
+  try {
+    emit_event({{"type", "warning"}, {"message", std::move(message)}});
+  } catch (...) {
+  }
+}
+
 double monotonic_seconds() {
   return std::chrono::duration<double>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
-bool cancellation_requested() { return interrupted != 0; }
+bool cancellation_requested() {
+  auto *state = execution_state;
+  if (!state)
+    return false;
+  if (state->callback_failed)
+    return true;
+  if (!state->context.cancelled || state->callback_active)
+    return false;
+  state->callback_active = true;
+  bool cancelled = false;
+  try {
+    cancelled = state->context.cancelled();
+  } catch (...) {
+    state->callback_failed = true;
+    cancelled = true;
+  }
+  state->callback_active = false;
+  return cancelled;
+}
 void check_cancelled() {
   if (cancellation_requested())
-    throw Error("InterruptedError", "Execution interrupted by signal " +
-                                        std::to_string(interrupted));
+    throw Error("InterruptedError", "Execution cancelled");
 }
 void initialize_runtime() {
   const char *precision = std::getenv("MLX_ENABLE_TF32");
@@ -162,12 +202,6 @@ void initialize_runtime() {
           "Set MLX_ENABLE_TF32=0 before using MLX for faithful attention");
     if (!flag && setenv("MLX_ENABLE_TF32", "0", 1))
       os_error("Setting MLX_ENABLE_TF32");
-    struct sigaction action{};
-    action.sa_handler = interrupt_handler;
-    sigemptyset(&action.sa_mask);
-    if (sigaction(SIGINT, &action, nullptr) ||
-        sigaction(SIGTERM, &action, nullptr))
-      os_error("Installing cancellation handlers");
     @autoreleasepool {
       auto version = [[NSProcessInfo processInfo] operatingSystemVersion];
       if (version.majorVersion < 26 ||
@@ -239,12 +273,12 @@ Json runtime_info() {
         {"backend", "mlx-metal"},
         {"device", device},
         {"MLX_ENABLE_TF32", std::getenv("MLX_ENABLE_TF32")},
-        {"executable_sha256", executable_hash()},
+        {"core_build_sha256", core_build_sha256()},
         {"metallib_sha256", kernel_hash},
         {"runtime_sha256",
          kernel_hash.is_null()
              ? Json(nullptr)
-             : Json(identity({{"executable_sha256", executable_hash()},
+             : Json(identity({{"core_build_sha256", core_build_sha256()},
                               {"metallib_sha256", kernel_hash}}))}};
   }
 }
@@ -440,7 +474,7 @@ ResourceMonitor::~ResourceMonitor() {
     try {
       close();
     } catch (...) {
-      diagnostic(error_text(std::current_exception()));
+      report_diagnostic(error_text(std::current_exception()));
     }
 }
 void ResourceMonitor::check() const {
@@ -596,7 +630,7 @@ GPUExecution::~GPUExecution() {
   try {
     close();
   } catch (...) {
-    diagnostic(error_text(std::current_exception()));
+    report_diagnostic(error_text(std::current_exception()));
   }
 }
 void GPUExecution::check() const {
@@ -652,80 +686,31 @@ void GPUExecution::close() {
 }
 
 struct Progress::Impl {
-  bool enabled, finished = false, tty = false, stop = false;
-  int columns = 80, width = 0, complete = 0, total,
-      exceptions = std::uncaught_exceptions();
+  bool enabled, finished = false;
+  int complete = 0, total, exceptions = std::uncaught_exceptions();
   std::string label, unit;
-  double start = monotonic_seconds(), last = 0, interval = 5;
-  std::mutex mutex;
-  std::condition_variable wake;
-  std::thread thread;
+  double start = monotonic_seconds();
   Impl(bool e, std::string l, std::string u, int t)
-      : enabled(e), total(t), label(ascii(std::move(l))),
-        unit(ascii(std::move(u))) {}
-  void render(const char *status = nullptr, bool force = false) {
-    if (!enabled)
-      return;
-    double now = monotonic_seconds();
-    if (!force && now - last < interval)
-      return;
-    last = now;
-    double elapsed = std::max(0., now - start);
-    std::ostringstream suffix;
-    suffix << std::fixed << std::setprecision(1);
-    if (total > 0) {
-      if (tty) {
-        int fill = std::clamp(int(8. * complete / total), 0, 8);
-        suffix << "[" << std::string(fill, '#') << std::string(8 - fill, '-')
-               << "] ";
-      }
-      suffix << complete << "/" << total << " "
-             << (unit.empty() ? "items" : unit) << " (" << std::setprecision(0)
-             << 100. * complete / total << "%) | " << std::setprecision(1);
-    } else if (!unit.empty() || complete)
-      suffix << complete << " " << (unit.empty() ? "items" : unit) << " | ";
-    if (unit == "tokens")
-      suffix << (elapsed > 0 ? complete / elapsed : 0) << " tokens/s | ";
-    suffix << (tty ? "" : "elapsed ") << elapsed << "s";
-    std::string prefix =
-        status ? status
-               : (tty ? std::string(1, "|/-\\"[int(elapsed / .25) % 4])
-                      : (force && complete == 0 ? "Starting" : "Running"));
-    std::string shown = label;
-    if (tty) {
-      int available =
-          columns - 1 -
-          int(std::string("[YuE2] " + prefix + " : " + suffix.str()).size());
-      if (int(shown.size()) > std::max(0, available))
-        shown = shown.substr(0, std::max(0, available - 3)) +
-                (available >= 3 ? "..." : "");
-    }
-    std::string text = "[YuE2] " + prefix + " " + shown + ": " + suffix.str();
-    std::lock_guard output(stderr_mutex);
-    if (tty) {
-      text.resize(std::min(text.size(), size_t(columns - 1)));
-      std::string padding(std::max(0, width - int(text.size())), ' ');
-      if (std::fprintf(stderr, "\r%s%s%s", text.c_str(), padding.c_str(),
-                       status ? "\n" : "") < 0)
-        enabled = false;
-      width = status ? 0 : int(text.size());
-    } else if (std::fprintf(stderr, "%s\n", text.c_str()) < 0)
-      enabled = false;
-    if (std::fflush(stderr))
-      enabled = false;
+      : enabled(e), total(t), label(std::move(l)), unit(std::move(u)) {}
+  void publish(const char *type, bool truncated = false,
+               const char *status = "running") {
+    if (enabled && execution_state && execution_state->context.progress &&
+        execution_state->context.event && !execution_state->callback_failed)
+      emit_event(
+          {{"type", type},
+           {"stage", label},
+           {"unit", unit},
+           {"completed", complete},
+           {"total", total > 0 ? Json(total) : Json(nullptr)},
+           {"elapsed_seconds", std::max(0., monotonic_seconds() - start)},
+           {"truncated", truncated},
+           {"status", status}});
   }
-  void finish(const char *status) {
-    {
-      std::lock_guard lock(mutex);
-      if (finished)
-        return;
-      finished = true;
-      stop = true;
-      render(status, true);
-    }
-    wake.notify_all();
-    if (thread.joinable())
-      thread.join();
+  void finish(bool truncated, const char *status) {
+    if (finished)
+      return;
+    finished = true;
+    publish("stage_completed", truncated, status);
   }
 };
 Progress::Progress(bool enabled, std::string label, std::string unit, int total)
@@ -733,60 +718,35 @@ Progress::Progress(bool enabled, std::string label, std::string unit, int total)
                                    total)) {
   if (total < 0)
     throw Error("ValueError", "total must be nonnegative");
-  auto &p = *impl_;
-  if (!enabled)
-    return;
-  p.tty = isatty(STDERR_FILENO);
-  if (p.tty) {
-    struct winsize ws{};
-    const char *cols = std::getenv("COLUMNS");
-    char *end = nullptr;
-    long value = cols ? std::strtol(cols, &end, 10) : 0;
-    if (cols && end != cols && !*end && value > 0 && value <= 100000)
-      p.columns = int(value);
-    else if (!ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) && ws.ws_col)
-      p.columns = ws.ws_col;
-    p.tty = p.columns >= 60;
-  }
-  p.interval = p.tty ? .25 : 5.;
-  p.render(nullptr, true);
-  p.thread = std::thread([&p] {
-    std::unique_lock lock(p.mutex);
-    while (!p.wake.wait_for(lock, std::chrono::duration<double>(p.interval),
-                            [&p] { return p.stop; }))
-      p.render();
-  });
+  impl_->publish("stage_started");
 }
 Progress::~Progress() {
-  impl_->finish(cancellation_requested()
-                    ? "Cancelled"
-                    : (std::uncaught_exceptions() > impl_->exceptions
-                           ? "Failed"
-                           : "Completed"));
+  try {
+    impl_->finish(false, cancellation_requested() ? "cancelled"
+                         : std::uncaught_exceptions() > impl_->exceptions
+                             ? "failed"
+                             : "completed");
+  } catch (...) {
+    report_diagnostic("Could not publish stage completion");
+  }
 }
 void Progress::update(int complete, int total) {
   if (complete < 0 || total < 0)
     throw Error("ValueError", "Progress counts must be nonnegative");
   auto &p = *impl_;
-  std::lock_guard lock(p.mutex);
   if (p.finished)
     return;
   p.complete = complete;
   if (total > 0)
     p.total = total;
-  p.render();
+  p.publish("progress");
 }
 void Progress::advance() {
   auto &p = *impl_;
-  std::lock_guard lock(p.mutex);
-  if (p.finished)
-    return;
-  ++p.complete;
-  p.render();
+  if (!p.finished) {
+    ++p.complete;
+    p.publish("progress");
+  }
 }
-void Progress::finish(bool truncated) {
-  impl_->finish(truncated ? (impl_->tty ? "Limit reached"
-                                        : "Finished (generation limit reached)")
-                          : "Completed");
-}
+void Progress::finish(bool truncated) { impl_->finish(truncated, "completed"); }
 } // namespace lyra

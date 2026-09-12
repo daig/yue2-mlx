@@ -1,0 +1,4 @@
+module CLyraCore {
+    header "lyra.h"
+    export *
+}
