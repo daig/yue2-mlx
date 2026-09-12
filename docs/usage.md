@@ -210,6 +210,8 @@ CLI interruption stops the current operation rather than treating partial artifa
 
 The default guard is a **sampled 16 GiB whole-process budget**. It monitors process footprint, system memory pressure/headroom, swap growth and native runtime memory counters, with preflight checks for native decoder buffers and graph outputs. This is not a blanket MPSGraph hard cap, nor a claim that framework counters sum to process memory. Bounded prefill/query/VAE tiling remains necessary between samples. Existing swap at entry is not itself a failure.
 
+Warning-level system memory pressure (`2`) is recorded but does not itself abort a run. Critical or unrecognized pressure is rejected. The independent limits still stop execution when process footprint exceeds its budget, free plus inactive system memory falls below 2 GiB, new swap-outs exceed 64 MiB, or swap usage grows by more than 128 MiB.
+
 These are native implementation invariants, not numerical or performance acceptance results. Retained BF16/performance/listening/numerical measurements describe the historical Python implementation. Initial native migration uses reasoning-first implementation and bounded smoke execution; comprehensive native fidelity/performance auditing is deferred to user guidance.
 
 ## Reproducibility contract

@@ -50,7 +50,7 @@ This is a reasoning-first migration with bounded native smoke execution. Compreh
 - Decoder-only FP32, 48 kHz stereo; natural samples/channel = `1920*T - 64`.
 - Preserve halo-and-crop decoding: upstream core 1024 frames, port default 256, halo 16; the historical Python investigation measured required halo 12. No crossfades, truncated right context or output padding. Smaller cores are a memory tradeoff, unlike smaller NAR chunks.
 - Avoid unnecessary stage weight transfers/duplicate full models on unified memory. Keep large tensors resident when capacity permits; CPU artifact conversion once per stage is acceptable, not inside hot loops.
-- The native resource guard remains sampled process/memory-pressure enforcement, with preflight checks for decoder buffers and graph outputs, not a blanket MPSGraph hard cap. Bounded tiling remains necessary.
+- The native resource guard uses sampled process/memory-pressure enforcement, with preflight checks for decoder buffers and graph outputs, not a blanket MPSGraph hard cap. Warning pressure is allowed while footprint, available-memory and swap limits hold; critical or unrecognized pressure is rejected. Bounded tiling remains necessary.
 - Keep `MLX_ENABLE_TF32=0`. An FP32 tensor dtype alone is insufficient evidence of arithmetic parity; native decoder fidelity still requires its own audit. Preserve PCM-24 FLAC and float WAV export.
 
 ## Historical Python acoustic optimization

@@ -564,9 +564,11 @@ struct GPUExecution::Impl {
       throw Error("MemoryError", "Process footprint exceeds " +
                                      std::to_string(budget) + " GiB budget");
     int pressure = sample.at("system_memory_pressure_level");
-    if (pressure != 1)
+    // Warning pressure alone is not evidence of an unsafe allocation. Keep
+    // monitoring the independent footprint, available-memory and swap limits.
+    if (pressure != 1 && pressure != 2)
       throw Error("MemoryError",
-                  "System memory pressure is not normal (level=" +
+                  "System memory pressure is critical or unrecognized (level=" +
                       std::to_string(pressure) + ")");
     if (sample.at("system_available_bytes").get<uint64_t>() < 2 * GiB)
       throw Error("MemoryError",
