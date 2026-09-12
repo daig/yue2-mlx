@@ -37,7 +37,7 @@ Output directories must be absent or empty; Lyra never mixes or silently overwri
 
 ### Inline request overrides
 
-The request path is optional when `--style` and `--lyrics` (or `--lyrics-file`) are supplied. `--id`, `--seed`, `--cfg-scale`, `--mode`, and `--abc`/`--abc-file` override matching JSON fields. A JSON request may use relative `lyrics_path` and `abc_path` values; they resolve relative to that request file.
+The request path is optional when `--style` and `--lyrics` (or `--lyrics-file`) are supplied. `--id`, `--seed`, `--cfg-scale`, `--mode`, and `--abc`/`--abc-file` override matching JSON fields. A JSON request may use relative `lyrics_path` and `abc_path` values; they resolve relative to that request file. If `--output` is omitted, `generate` and `plan` use `runs/default/<id>`, while `batch` uses `runs/batch`.
 
 ```bash
 uv run lyra generate \

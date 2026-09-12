@@ -221,6 +221,7 @@ def _batch(args):
     if not rows:
         report["complete"] = True
         write_json(output / "batch.json", report)
+    return int(bool(report["failed"]))
 
 def _doctor(args):
     versions, errors = {}, {}
