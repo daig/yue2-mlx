@@ -343,6 +343,22 @@ struct RequestDraft: Codable, Equatable, Sendable {
     self.kind = kind
     state = restored(Snapshot.self, key: "Yueqin.draft.\(kind.rawValue).v1") ?? Snapshot()
     self.brief = brief
+    if kind == .generate { migrateCopiedEditorScore() }
+  }
+
+  /// Before score attachments, "Use in song" copied the editor's ABC into the
+  /// saved song draft. Such a draft would keep resubmitting that stale snapshot
+  /// once no score is attached, so select automatic notation once. The ABC text
+  /// is retained so a deliberately supplied score can be selected again.
+  private func migrateCopiedEditorScore() {
+    let key = "Yueqin.draft.generate.copiedScoreMigrated"
+    guard !UserDefaults.standard.bool(forKey: key) else { return }
+    if state.request.scoreSource == "text" {
+      state.request.scoreSource = "generate"
+      state.request.overrideABC = false
+      persist(state, key: "Yueqin.draft.\(kind.rawValue).v1")
+    }
+    UserDefaults.standard.set(true, forKey: key)
   }
 
   func attachBrief(_ brief: WorkingBrief) { self.brief = brief }
