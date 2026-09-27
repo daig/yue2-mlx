@@ -40,11 +40,10 @@ struct TokenGeneration {
   Json timing;
   bool truncated = false;
 };
-TokenGeneration generate_tokens(ARModel &, const std::vector<int> &prefix,
-                                const Sampling &, uint64_t seed,
-                                std::string_view phase,
-                                const std::vector<int> &negative = {},
-                                double cfg_scale = 1, bool legacy_off = false,
-                                const Cancelled &cancelled = {},
-                                const TokenCallback &on_token = {});
+TokenGeneration
+generate_tokens(ARModel &, const std::vector<int> &prefix, const Sampling &,
+                uint64_t seed, std::string_view phase,
+                const std::vector<int> &negative = {}, double cfg_scale = 1,
+                bool legacy_off = false, const Cancelled &cancelled = {},
+                const TokenCallback &on_token = {}, bool progress = false);
 } // namespace lyra

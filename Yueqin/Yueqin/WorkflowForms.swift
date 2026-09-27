@@ -7,12 +7,19 @@ struct WorkflowForm: View {
   let kind: WorkflowKind
   @Bindable var draft: WorkflowDraft
   @Bindable var settings: EngineSettings
+  let usesEditorScore: Bool
+  let editorScoreABC: (() -> String?)?
   @State private var exportError: String?
 
-  init(kind: WorkflowKind, draft: WorkflowDraft, settings: EngineSettings) {
+  init(
+    kind: WorkflowKind, draft: WorkflowDraft, settings: EngineSettings,
+    usesEditorScore: Bool = false, editorScoreABC: (() -> String?)? = nil
+  ) {
     self.kind = kind
     self.draft = draft
     self.settings = settings
+    self.usesEditorScore = usesEditorScore
+    self.editorScoreABC = editorScoreABC
   }
 
   var body: some View {
@@ -29,7 +36,7 @@ struct WorkflowForm: View {
               "Choose the intact folder containing plan.json and plan_manifest.json. Saved ABC token IDs and generation settings are restored exactly."
           )
           Text(
-            "To edit a score, copy score.abc to a new file and use Generate song with a supplied score. Do not modify integrity-checked plan artifacts."
+            "To change the music, open the score in Scores, edit it, then choose Create song. Keep integrity-checked saved plan artifacts unchanged."
           )
           .font(.caption).foregroundStyle(.secondary)
         }
@@ -115,7 +122,9 @@ struct WorkflowForm: View {
 
   @ViewBuilder
   private var requestSections: some View {
-    Section("Request") {
+    Section("Shared song brief") {
+      Text("Style and lyrics are shared between Scores and song setup.")
+        .font(.caption).foregroundStyle(.secondary)
       Picker("Request source", selection: $draft.request.source) {
         Text("Compose").tag("compose")
         Text("JSON file").tag("file")
@@ -123,7 +132,7 @@ struct WorkflowForm: View {
       .pickerStyle(.segmented)
       .accessibilityIdentifier("request.source")
       .help(
-        "Compose an editable request or submit a JSON file unchanged with optional explicit overrides."
+        "Compose a shared brief or use a JSON file with explicit overrides. Score generation and an attached editor score always replace the file’s score and conditioning."
       )
       if draft.request.source == "file" {
         PathField(
@@ -139,8 +148,10 @@ struct WorkflowForm: View {
     }
     if draft.request.source == "file" {
       Section("Explicit file overrides") {
-        Text("Only enabled overrides are sent. Unchecked fields use the original JSON values.")
-          .font(.caption).foregroundStyle(.secondary)
+        Text(
+          "Enabled overrides replace file values. Shared style and lyrics apply in both workflows. Score generation and an editor attachment always replace the score and mode."
+        )
+        .font(.caption).foregroundStyle(.secondary)
         override(
           "Override style", enabled: $draft.request.overrideStyle,
           identifier: "request.override.style"
@@ -156,58 +167,67 @@ struct WorkflowForm: View {
         override(
           "Override seed", enabled: $draft.request.overrideSeed, identifier: "request.override.seed"
         ) { seedField }
-        override(
-          "Override score mode", enabled: $draft.request.overrideCot,
-          identifier: "request.override.cot"
-        ) { modeField }
+        if kind == .plan || usesEditorScore {
+          modeField
+        } else {
+          override(
+            "Override score mode", enabled: $draft.request.overrideCot,
+            identifier: "request.override.cot"
+          ) { modeField }
+        }
         override(
           "Override CFG scale", enabled: $draft.request.overrideCFG,
           identifier: "request.override.cfg_scale"
         ) { cfgField }
-        override(
-          "Override ABC score", enabled: $draft.request.overrideABC,
-          identifier: "request.override.abc"
-        ) {
-          Picker("ABC override source", selection: $draft.request.scoreSource) {
-            Text("ABC file").tag("file")
-            Text("ABC text").tag("text")
-          }
-          .accessibilityIdentifier("request.abc_override_source")
-          if draft.request.scoreSource == "text" {
-            MultilineField(
-              title: "ABC score", text: $draft.request.abc, identifier: "request.abc",
-              guidance: "Exact score snapshot, including editor changes. Use full or melody mode.",
-              monospaced: true)
-          } else {
-            PathField(
-              title: "ABC score", path: $draft.request.abcPath, selection: .file,
-              identifier: "request.abc",
-              guidance: "Supplied UTF-8 ABC is preserved exactly. Incompatible with cot = off.")
+        if kind != .plan && !usesEditorScore {
+          override(
+            "Override ABC score", enabled: $draft.request.overrideABC,
+            identifier: "request.override.abc"
+          ) {
+            Picker("ABC override source", selection: $draft.request.scoreSource) {
+              Text("ABC file").tag("file")
+              Text("ABC text").tag("text")
+            }
+            .accessibilityIdentifier("request.abc_override_source")
+            if draft.request.scoreSource == "text" {
+              MultilineField(
+                title: "ABC score", text: $draft.request.abc, identifier: "request.abc",
+                guidance:
+                  "Exact score snapshot, including editor changes. Use full or melody mode.",
+                monospaced: true)
+            } else {
+              PathField(
+                title: "ABC score", path: $draft.request.abcPath, selection: .file,
+                identifier: "request.abc",
+                guidance: "Supplied UTF-8 ABC is preserved exactly. Incompatible with cot = off.")
+            }
           }
         }
       }
     } else {
       Section("Score") {
         modeField
-        Picker("Score source", selection: $draft.request.scoreSource) {
-          Text("Generate").tag("generate")
-          Text("ABC text").tag("text")
-          Text("ABC file").tag("file")
-        }
-        .accessibilityIdentifier("request.score_source")
-        .help(
-          "Generate ABC, or supply exact UTF-8 ABC. Supplied ABC is invalid when score mode is off."
-        )
-        if draft.request.scoreSource == "text" {
-          MultilineField(
-            title: "ABC score", text: $draft.request.abc, identifier: "request.abc",
-            guidance: "Preserved as entered; choose full or melody to use a supplied score.",
-            monospaced: true)
-        } else if draft.request.scoreSource == "file" {
-          PathField(
-            title: "ABC score", path: $draft.request.abcPath, selection: .file,
-            identifier: "request.abc",
-            guidance: "The UTF-8 file is read by the engine without rewriting its score.")
+        if kind != .plan && !usesEditorScore {
+          Picker("Score source", selection: $draft.request.scoreSource) {
+            Text("Generate").tag("generate")
+            Text("ABC text").tag("text")
+            Text("ABC file").tag("file")
+          }
+          .accessibilityIdentifier("request.score_source")
+          .help(
+            "Generate ABC, or supply exact UTF-8 ABC. Supplied ABC is invalid when score mode is off."
+          )
+          if draft.request.scoreSource == "text" {
+            MultilineField(
+              title: "ABC score", text: $draft.request.abc, identifier: "request.abc",
+              guidance: "Preserved as entered; choose full or melody to use a supplied score.",
+              monospaced: true)
+          } else if draft.request.scoreSource == "file" {
+            PathField(
+              title: "ABC score", path: $draft.request.abcPath, selection: .file,
+              identifier: "request.abc",
+              guidance: "The UTF-8 file is read by the engine without rewriting its score.")
+          }
         }
       }
       Section("Request identity") {
@@ -244,7 +264,7 @@ struct WorkflowForm: View {
         Button("Export Request JSON…", action: exportRequest)
           .accessibilityIdentifier("request.export")
           .help(
-            "Save this composed request as JSON. File-sourced lyrics and scores remain absolute path references; this does not run the workflow."
+            "Save the effective request as JSON, including the attached score snapshot when present. File-sourced lyrics and scores remain absolute path references; this does not run the workflow."
           )
       }
     }
@@ -297,14 +317,27 @@ struct WorkflowForm: View {
   }
 
   private var modeField: some View {
-    Picker("Score mode (cot)", selection: $draft.request.cot) {
+    Picker(
+      kind == .plan || usesEditorScore ? "Score conditioning" : "Score mode (cot)",
+      selection: Binding(
+        get: {
+          (kind == .plan || usesEditorScore) && draft.request.cot == "off"
+            ? "full" : draft.request.cot
+        },
+        set: { draft.request.cot = $0 }
+      )
+    ) {
       Text("Full · melody and chords").tag("full")
       Text("Melody only").tag("melody")
-      Text("Off · no score").tag("off")
+      if kind != .plan && !usesEditorScore {
+        Text("Off · no score").tag("off")
+      }
     }
     .accessibilityIdentifier("request.cot")
     .help(
-      "Full plans melody and chords. Melody leaves accompaniment free. Off generates semantic music directly and rejects supplied ABC."
+      kind == .plan || usesEditorScore
+        ? "Full conditions on melody and chords. Melody leaves accompaniment free."
+        : "Full plans melody and chords. Melody leaves accompaniment free. Off generates semantic music directly and rejects supplied ABC."
     )
   }
 
@@ -429,7 +462,13 @@ struct WorkflowForm: View {
 
   private func exportRequest() {
     do {
-      let data = try draft.requestData()
+      let scoreABC = usesEditorScore ? editorScoreABC?() : nil
+      guard !usesEditorScore || scoreABC != nil else {
+        exportError =
+          "The attached editor score is unavailable. Return to Scores and attach it again."
+        return
+      }
+      let data = try draft.requestData(scoreABC: scoreABC)
       let panel = NSSavePanel()
       panel.title = "Export Request JSON"
       panel.allowedContentTypes = [.json]

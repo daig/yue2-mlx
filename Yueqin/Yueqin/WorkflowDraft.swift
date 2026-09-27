@@ -9,8 +9,8 @@ enum WorkflowKind: String, CaseIterable, Identifiable, Sendable {
   var title: String {
     switch self {
     case .generate: "Generate song"
-    case .plan: "Plan score"
-    case .renderPlan: "Render plan"
+    case .plan: "Scores"
+    case .renderPlan: "Render saved plan"
     case .replay: "Replay artifacts"
     case .batch: "Batch"
     case .prepare: "Prepare models"
@@ -30,9 +30,9 @@ enum WorkflowKind: String, CaseIterable, Identifiable, Sendable {
   }
   var actionTitle: String {
     switch self {
-    case .generate: "Generate"
-    case .plan: "Plan score"
-    case .renderPlan: "Render"
+    case .generate: "Generate song"
+    case .plan: "Generate score"
+    case .renderPlan: "Render saved plan"
     case .replay: "Replay"
     case .batch: "Run batch"
     case .prepare: "Prepare"
@@ -230,6 +230,55 @@ struct RequestDraft: Codable, Equatable, Sendable {
   func save() { persist(state, key: "Yueqin.engineSettings.v1") }
 }
 
+@MainActor @Observable final class WorkingBrief {
+  private struct Snapshot: Codable {
+    var source: String
+    var filePath: String
+    var style: String
+    var lyrics: String
+    var lyricsSource: String
+    var lyricsPath: String
+    var overrideStyle: Bool
+    var overrideLyrics: Bool
+
+    init(_ request: RequestDraft) {
+      source = request.source
+      filePath = request.filePath
+      style = request.style
+      lyrics = request.lyrics
+      lyricsSource = request.lyricsSource
+      lyricsPath = request.lyricsPath
+      overrideStyle = request.overrideStyle
+      overrideLyrics = request.overrideLyrics
+    }
+  }
+  private var state: Snapshot
+
+  init(fallback: RequestDraft) {
+    state = restored(Snapshot.self, key: "Yueqin.workingBrief.v1") ?? Snapshot(fallback)
+  }
+
+  fileprivate func project(onto request: RequestDraft) -> RequestDraft {
+    var result = request
+    result.source = state.source
+    result.filePath = state.filePath
+    result.style = state.style
+    result.lyrics = state.lyrics
+    result.lyricsSource = state.lyricsSource
+    result.lyricsPath = state.lyricsPath
+    result.overrideStyle = state.overrideStyle
+    result.overrideLyrics = state.overrideLyrics
+    return result
+  }
+
+  fileprivate func update(from request: RequestDraft) {
+    state = Snapshot(request)
+    save()
+  }
+
+  func save() { persist(state, key: "Yueqin.workingBrief.v1") }
+}
+
 @MainActor @Observable final class WorkflowDraft {
   struct Snapshot: Codable, Equatable {
     var request = RequestDraft()
@@ -244,10 +293,18 @@ struct RequestDraft: Codable, Equatable, Sendable {
   }
   let kind: WorkflowKind
   private var state: Snapshot
-  var snapshot: Snapshot { state }
+  private var brief: WorkingBrief?
+  var snapshot: Snapshot {
+    var result = state
+    result.request = request
+    return result
+  }
   var request: RequestDraft {
-    get { state.request }
-    set { state.request = newValue }
+    get { brief?.project(onto: state.request) ?? state.request }
+    set {
+      state.request = newValue
+      brief?.update(from: newValue)
+    }
   }
   var inputPath: String {
     get { state.inputPath }
@@ -282,15 +339,52 @@ struct RequestDraft: Codable, Equatable, Sendable {
     set { state.batchMode = newValue }
   }
 
-  init(kind: WorkflowKind) {
+  init(kind: WorkflowKind, brief: WorkingBrief? = nil) {
     self.kind = kind
     state = restored(Snapshot.self, key: "Yueqin.draft.\(kind.rawValue).v1") ?? Snapshot()
+    self.brief = brief
   }
-  func save() { persist(state, key: "Yueqin.draft.\(kind.rawValue).v1") }
 
-  func requestData() throws -> Data { try request.composedObject().data() }
+  func attachBrief(_ brief: WorkingBrief) { self.brief = brief }
 
-  func makeSubmission(settings: EngineSettings) throws -> RunSubmission {
+  func save() {
+    persist(snapshot, key: "Yueqin.draft.\(kind.rawValue).v1")
+    brief?.save()
+  }
+
+  private func effectiveRequest(scoreABC: String?) -> RequestDraft {
+    var result = request
+    if kind == .plan || (kind == .generate && scoreABC != nil) {
+      result.cot = result.cot == "melody" ? "melody" : "full"
+      result.overrideCot = true
+      result.overrideABC = false
+      result.scoreSource = kind == .plan ? "generate" : "text"
+      result.abc = kind == .plan ? "" : scoreABC!
+    }
+    return result
+  }
+
+  private func fileRequestOptions(scoreABC: String?) throws -> JSONObject {
+    let effective = effectiveRequest(scoreABC: scoreABC)
+    var options = JSONObject()
+    try effective.addFileRequest(to: &options)
+    if kind == .plan || (kind == .generate && scoreABC != nil) {
+      var overrides = try JSONObject(raw: options.fields["overrides"] ?? "{}")
+      if kind == .plan {
+        overrides.fields["abc"] = "null"
+      } else {
+        try overrides.set("abc", scoreABC!)
+      }
+      options.fields["overrides"] = try overrides.text()
+    }
+    return options
+  }
+
+  func requestData(scoreABC: String? = nil) throws -> Data {
+    try effectiveRequest(scoreABC: scoreABC).composedObject().data()
+  }
+
+  func makeSubmission(settings: EngineSettings, scoreABC: String? = nil) throws -> RunSubmission {
     var options = JSONObject()
     try options.set("precision", settings.precision)
     let output: URL?
@@ -343,9 +437,10 @@ struct RequestDraft: Codable, Equatable, Sendable {
     switch kind {
     case .generate, .plan:
       if request.source == "file" {
-        try request.addFileRequest(to: &options)
+        options.fields.merge(try fileRequestOptions(scoreABC: scoreABC).fields) { _, value in value
+        }
       } else {
-        options.fields["request"] = try request.composedObject().text()
+        options.fields["request"] = try effectiveRequest(scoreABC: scoreABC).composedObject().text()
       }
       if kind == .generate { options.fields["resume"] = resume ? "true" : "false" }
     case .renderPlan, .replay, .batch:

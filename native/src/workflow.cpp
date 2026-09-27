@@ -84,8 +84,9 @@ void validate_options(Operation operation, const Json &options) {
     for (auto it = overrides.begin(); it != overrides.end(); ++it) {
       if (it.key() == "id" || it.key() == "style" || it.key() == "lyrics" ||
           it.key() == "cot" || it.key() == "abc") {
-        if (!it->is_string())
-          throw WorkflowInputError(it.key() + " override must be a string");
+        if (!it->is_string() && !(it.key() == "abc" && it->is_null()))
+          throw WorkflowInputError(it.key() + " override must be a string" +
+                                   (it.key() == "abc" ? " or null" : ""));
       } else if (it.key() == "seed") {
         if (!it->is_number_integer())
           throw WorkflowInputError("seed override must be an integer");

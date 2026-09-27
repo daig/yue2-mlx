@@ -102,9 +102,19 @@ struct TerminalProgress::Impl {
     int complete = event.value("completed", 0);
     int total = event.at("total").is_null() ? 0 : event.at("total").get<int>();
     auto unit = ascii(event.value("unit", ""));
+    if (unit == "prompt_tokens")
+      unit = "prompt tokens";
+    else if (unit == "conditioning_layers")
+      unit = "conditioning layers";
     std::ostringstream suffix;
     suffix << std::fixed << std::setprecision(1);
-    if (total > 0) {
+    if (unit == "codec_frames") {
+      suffix << event.value("content_seconds", 0.) << "s audio represented";
+      if (auto limit = event.find("limit_seconds");
+          limit != event.end() && limit->is_number())
+        suffix << " (limit " << limit->get<double>() << "s)";
+      suffix << " | ";
+    } else if (total > 0) {
       if (tty) {
         int fill = std::clamp(int(8. * complete / total), 0, 8);
         suffix << "[" << std::string(fill, '#') << std::string(8 - fill, '-')
@@ -112,10 +122,16 @@ struct TerminalProgress::Impl {
       }
       suffix << complete << "/" << total << " "
              << (unit.empty() ? "items" : unit) << " (" << std::setprecision(0)
-             << 100. * complete / total << "%) | " << std::setprecision(1);
-    } else if (!unit.empty() || complete)
-      suffix << complete << " " << (unit.empty() ? "items" : unit) << " | ";
-    if (unit == "tokens")
+             << 100. * complete / total << "% of stage) | "
+             << std::setprecision(1);
+    } else if (!unit.empty() || complete) {
+      suffix << complete << " " << (unit.empty() ? "items" : unit);
+      if (auto limit = event.find("limit");
+          limit != event.end() && limit->is_number())
+        suffix << " (limit " << limit->get<int>() << ")";
+      suffix << " | ";
+    }
+    if (unit == "tokens" && total == 0)
       suffix << (elapsed > 0 ? complete / elapsed : 0) << " tokens/s | ";
     suffix << (tty ? "" : "elapsed ") << elapsed << "s";
     std::string prefix = status ? status

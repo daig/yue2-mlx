@@ -46,3 +46,6 @@ htmlcov/
 
 # Internal project brief
 /goal.md
+
+# Xcode per-user state
+xcuserdata/

@@ -78,6 +78,66 @@ import UniformTypeIdentifiers
   }
 }
 
+struct RunProgressView: View {
+  let progress: RunJSON
+
+  private var unit: String { progress["unit"].text ?? "" }
+  private var completed: Double { max(0, progress["completed"].number ?? 0) }
+  private var exactTotal: Double? {
+    guard unit != "codec_frames", progress["limit"].number == nil,
+      let total = progress["total"].number, total > 0
+    else { return nil }
+    return total
+  }
+  private var unitLabel: String {
+    switch unit {
+    case "steps": "solver steps"
+    case "chunks": "decoder chunks"
+    default: unit.replacingOccurrences(of: "_", with: " ")
+    }
+  }
+  private func duration(_ seconds: Double) -> String {
+    seconds.formatted(.number.precision(.fractionLength(1)))
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if let total = exactTotal {
+        ProgressView(value: min(completed, total), total: total)
+        Text("\(completed.formatted()) / \(total.formatted()) \(unitLabel)")
+        Text(
+          "Current stage: \((min(completed / total, 1) * 100).formatted(.number.precision(.fractionLength(0))))%"
+        )
+        .foregroundStyle(.secondary)
+      } else {
+        HStack(alignment: .top, spacing: 8) {
+          ProgressView().controlSize(.small)
+          VStack(alignment: .leading, spacing: 4) {
+            if unit == "codec_frames", let seconds = progress["content_seconds"].number {
+              Text("\(duration(seconds)) s of audio represented")
+              if let limit = progress["limit_seconds"].number {
+                Text("Duration limit: \(duration(limit)) s").foregroundStyle(.secondary)
+              }
+              Text("Not yet playable audio.").foregroundStyle(.secondary)
+            } else if unit == "tokens", let limit = progress["limit"].number {
+              Text("\(completed.formatted()) \(unitLabel) produced")
+              Text("Token limit: \(limit.formatted())").foregroundStyle(.secondary)
+            } else if completed > 0, !unit.isEmpty {
+              Text("\(completed.formatted()) \(unitLabel)")
+            } else {
+              Text("In progress").foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+    .font(.caption)
+    .monospacedDigit()
+    .fixedSize(horizontal: false, vertical: true)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
 @MainActor struct RunResultsView: View {
   let controller: RunController
   let onUseOutput: (WorkflowKind, URL) -> Void
@@ -140,19 +200,7 @@ import UniformTypeIdentifiers
         }
       }
       if controller.isRunning {
-        if let complete = controller.progress["completed"].number,
-          let total = controller.progress["total"].number, total > 0
-        {
-          ProgressView(value: min(complete, total), total: total)
-        } else {
-          ProgressView().controlSize(.small)
-        }
-        if let count = controller.progress["completed"].number {
-          Text(
-            "\(count.formatted()) \(controller.progress["unit"].text ?? "units") · stage \((controller.progress["elapsed_seconds"].number ?? 0).formatted(.number.precision(.fractionLength(1)))) s"
-          )
-          .font(.caption).monospacedDigit()
-        }
+        RunProgressView(progress: controller.progress)
         Button(
           controller.cancellationRequested ? "Cancellation requested" : "Cancel", role: .cancel
         ) { controller.cancel() }
@@ -229,13 +277,7 @@ import UniformTypeIdentifiers
       ).font(.caption)
     }
     if controller.succeeded, let output = controller.outputURL {
-      if controller.lastSubmission?.kind == .plan {
-        Button("Render saved plan", systemImage: "waveform") { onUseOutput(.renderPlan, output) }
-          .help(
-            "Renders the original saved plan, not editor changes. Use in song submits the current edited score."
-          )
-          .accessibilityIdentifier("result.render_plan")
-      } else if let kind = controller.lastSubmission?.kind,
+      if let kind = controller.lastSubmission?.kind,
         [WorkflowKind.generate, .renderPlan, .replay].contains(kind)
       {
         Button("Replay recording", systemImage: "arrow.clockwise") { onUseOutput(.replay, output) }
@@ -264,6 +306,17 @@ import UniformTypeIdentifiers
     DisclosureGroup("Advanced output", isExpanded: $advancedOutputExpanded) {
       VStack(alignment: .leading, spacing: 14) {
         if !controller.isRunning {
+          if controller.succeeded, controller.lastSubmission?.kind == .plan,
+            let output = controller.outputURL
+          {
+            Button("Render saved plan", systemImage: "waveform") {
+              onUseOutput(.renderPlan, output)
+            }
+            .help(
+              "Renders the frozen original. To use your edited score, choose Create song in Scores."
+            )
+            .accessibilityIdentifier("result.render_plan")
+          }
           if let output = controller.outputURL,
             controller.succeeded || !controller.artifacts.isEmpty
           {
@@ -314,7 +367,7 @@ import UniformTypeIdentifiers
             player.toggle(audio)
           } label: {
             Label(
-              player.url == audio && player.actuallyPlaying ? "Pause" : "Play",
+              player.url == audio && player.actuallyPlaying ? "Pause song" : "Play song",
               systemImage: player.url == audio && player.actuallyPlaying
                 ? "pause.fill" : "play.fill")
           }.accessibilityIdentifier("playback.toggle")

@@ -67,8 +67,10 @@ private:
 };
 class Progress {
 public:
+  // total is a known work count; limit is a generation ceiling, not a target.
+  // codec_frames additionally reports represented audio seconds.
   Progress(bool enabled, std::string label, std::string unit = "",
-           int total = 0);
+           int total = 0, int limit = 0);
   ~Progress();
   void update(int complete, int total = 0);
   void advance();

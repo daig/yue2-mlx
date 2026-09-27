@@ -7,6 +7,18 @@
     const model = () => window.YueqinScoreModel;
     const selected = () => parsed?.events.filter(event => selection.includes(event.start)) || [];
     const notice = message => { $("editor-notice").textContent = message || ""; };
+    const auxiliaryPanels = ["source-panel", "compatibility-panel", "help-panel"];
+    function closePanels(restoreFocus = false) {
+        auxiliaryPanels.forEach(id => { $(id).hidden = true; });
+        if (restoreFocus) $("viewport").focus({preventScroll:true});
+    }
+    function showPanel(id) {
+        closePanels();
+        $(id).hidden = false;
+        const target = $(id === "source-panel" ? "source-text" : id === "help-panel" ? "help-heading" : "compatibility-heading");
+        target.focus({preventScroll:true});
+        $(id).scrollIntoView({block:"nearest"});
+    }
     function native(action) { post({ kind: "native", id: documentID, action }); }
     function entryDuration() {
         const [n, d = 1] = duration.split("/").map(Number);
@@ -14,7 +26,7 @@
     }
     function stop() {
         if (playing) { cancelAnimationFrame(playing.frame); void playing.context.close(); playing = null; }
-        $("preview-button").textContent = "Play";
+        $("preview-button").textContent = "Preview notation";
         document.querySelectorAll(".score-playing").forEach(node => node.classList.remove("score-playing"));
     }
     function refresh() {
@@ -22,6 +34,9 @@
         catch (error) { parsed = { events: [], voices: [], headers: {}, issues: [{severity:"error", message:error.message}], editable:false, compatible:false }; }
         selection = selection.filter(start => parsed.events.some(event => event.start === start));
         const events = selected(), first = events[0];
+        $("pitch-controls").hidden = !first && !entering;
+        $("review-issues").hidden = parsed.compatible && !parsed.issues.length;
+        $("review-issues").textContent = parsed.issues.length ? `Review issues (${parsed.issues.length})` : "Review issues";
         $("selection-info").textContent = first ? `${first.voice} · bar ${first.measure} · ${events.length > 1 ? `${events.length} events` : `${first.pitch || first.kind} · ${first.duration} whole notes`}` : entering ? "End of part · continue typing to extend the score" : "Select a note or rest";
         $("entry-state").textContent = entering ? `Overwrite entry · ${entryDuration()}` : "Select mode";
         $("note-input").setAttribute("aria-pressed", String(entering));
@@ -31,7 +46,7 @@
         $("compatibility-list").replaceChildren(...parsed.issues.map(issue => {
             const li = document.createElement("li"), button = document.createElement("button");
             button.textContent = `${issue.severity}: ${issue.message}`;
-            button.addEventListener("click", () => { $("source-panel").open = true; $("source-text").focus(); $("source-text").setSelectionRange(issue.start || 0, issue.end ?? issue.start ?? 0); });
+            button.addEventListener("click", () => { showPanel("source-panel"); $("source-text").setSelectionRange(issue.start || 0, issue.end ?? issue.start ?? 0); });
             li.append(button); return li;
         }));
         if ($("source-text").value !== abc) {
@@ -120,7 +135,7 @@
                     oscillator.connect(gain); gain.connect(context.destination); oscillator.start(start); oscillator.stop(finish+.01);
                 }
             }
-            $("preview-button").textContent = "Stop"; notice("Preview tones — not generated audio. Both monophonic parts; no synthesized harmony.");
+            $("preview-button").textContent = "Stop preview";
             const frame = () => {
                 if (playing !== state) return;
                 const time = from + (context.currentTime-origin) / scale;
@@ -150,7 +165,7 @@
         else if (name === "copy" || name === "cut") {
             try { const text = model().copy(abc,selection); post({kind:"clipboard",id:documentID,text}); if (name === "cut") action("delete"); }
             catch (error) { notice(error.message); }
-        } else if (name === "showSource" || name === "source" || name === "showCompatibility" || name === "help") { const panel = name === "help" ? $("editor-help").parentElement : $(name === "showCompatibility" ? "compatibility-panel" : "source-panel"); panel.open = !panel.open; if (panel.open) panel.scrollIntoView({block:"nearest"}); }
+        } else if (name === "showSource" || name === "source" || name === "showCompatibility" || name === "help") { showPanel(name === "help" ? "help-panel" : name === "showCompatibility" ? "compatibility-panel" : "source-panel"); }
         else if (name === "noteInput" || name === "toggleNoteInput" || name === "input") { entering = !entering; if (!selection.length) move(1,false); refresh(); }
         else if (name === "selectAll") { selection = [...new Set(parsed.events.filter(event => event.voice === ($("entry-voice").value || "Vocal")).map(event => event.start))]; refresh(); report(); }
         else if (name === "play" || name === "preview") void preview();
@@ -166,13 +181,14 @@
         const changed = changedEpoch || abc !== payload.abc;
         if (changed) stop();
         documentID = next?.id ?? null; version = next?.version ?? 0; abc = payload.abc;
-        if (changedEpoch) { selection = []; anchor = null; entering = false; notice(""); }
+        if (changedEpoch) { closePanels(); $("properties-panel").open = false; selection = []; anchor = null; entering = false; notice(""); }
         if (next && Number.isInteger(next.selectionStart) && (changed || !selection.length)) selection = [next.selectionStart];
         for (const id of ["editor-toolbar","note-palette","editor-lower"]) $(id).hidden = !next;
         if (next) refresh(); else parsed = undefined;
         return {abc,reset:changedEpoch};
     }
     document.querySelectorAll("[data-command]").forEach(button => button.addEventListener("click", () => command(button.dataset.command,button.dataset.value || "")));
+    document.querySelectorAll("[data-dismiss]").forEach(button => button.addEventListener("click", () => closePanels(true)));
     document.querySelectorAll("[data-pitch]").forEach(button => button.addEventListener("click", () => enterPitch(button.dataset.pitch)));
     function setDuration(value) { duration = value; if (!entering && selection.length) action("duration",entryDuration()); refresh(); }
     document.querySelectorAll("[data-duration]").forEach(button => button.addEventListener("click", () => setDuration(button.dataset.duration)));
@@ -190,6 +206,7 @@
         if (documentID === null || event.isComposing) return;
         const textField = event.target.closest?.("input,textarea,select,[contenteditable]");
         const key = event.key.toLowerCase(), mod = event.metaKey || event.ctrlKey;
+        if (key === "escape" && auxiliaryPanels.some(id => !$(id).hidden)) { event.preventDefault(); closePanels(true); return; }
         if (mod && key === "s") { event.preventDefault(); native("save"); return; }
         if (mod && key === "z" && event.target === $("source-text")) { event.preventDefault(); native(event.shiftKey ? "redo" : "undo"); return; }
         if (textField) return;
@@ -219,7 +236,7 @@
         click(element, drag, mouseEvent) {
             if (documentID === null) return;
             const event = parsed.events.find(item => item.start < element.endChar && item.end > element.startChar);
-            if (!event) { notice("This notation element is outside the editable event model. Use ABC repair to inspect it."); if (drag?.step) host.render(abc); return; }
+            if (!event) { notice("This notation element is outside the editable event model. Open ABC source from the document menu to inspect it."); if (drag?.step) host.render(abc); return; }
             if (!drag?.step || !selection.includes(event.start)) select(event,!!mouseEvent?.shiftKey);
             if (drag?.step) action("diatonic",String(drag.step));
             $("viewport").focus({preventScroll:true});

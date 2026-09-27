@@ -151,7 +151,8 @@ mx::array last_hidden(const mx::array &h) {
 }
 mx::array prefill(ARModel &model, const std::vector<int> &tokens, int capacity,
                   std::string_view phase, std::vector<KVCache> &cache,
-                  const Cancelled &cancelled) {
+                  const Cancelled &cancelled, Progress &progress,
+                  int &completed) {
   cancelled_at(cancelled, "Cancelled before prefill");
   int layers = model.config.at("num_hidden_layers");
   cache.reserve(layers);
@@ -172,6 +173,8 @@ mx::array prefill(ARModel &model, const std::vector<int> &tokens, int capacity,
         state.push_back(*c.values);
       }
       mx::eval(state);
+      completed += stop - start;
+      progress.update(completed);
       hidden.reset();
       mx::clear_cache();
     }
@@ -185,7 +188,7 @@ TokenGeneration generate_tokens(ARModel &model, const std::vector<int> &prefix,
                                 const std::vector<int> &negative,
                                 double cfg_scale, bool legacy_off,
                                 const Cancelled &cancelled,
-                                const TokenCallback &on_token) {
+                                const TokenCallback &on_token, bool progress) {
   phase_size(phase);
   sampling.validate();
   validate_tokens(prefix, model.config.at("vocab_size"));
@@ -207,20 +210,30 @@ TokenGeneration generate_tokens(ARModel &model, const std::vector<int> &prefix,
   std::vector<KVCache> positive_cache, negative_cache;
   mx::synchronize();
   double started = monotonic_seconds();
+  const int prompt_tokens =
+      static_cast<int>(prefix.size() + (cfg_scale != 1 ? negative.size() : 0));
+  Progress preparation(progress, "Preparing prompt", "prompt_tokens",
+                       prompt_tokens);
+  int prepared = 0;
   auto conditional =
       prefill(model, prefix, int(prefix.size()) + sampling.max_tokens, phase,
-              positive_cache, cancelled);
+              positive_cache, cancelled, preparation, prepared);
   std::optional<mx::array> unconditional;
   if (cfg_scale != 1)
     unconditional =
         prefill(model, negative, int(negative.size()) + sampling.max_tokens,
-                phase, negative_cache, cancelled);
+                phase, negative_cache, cancelled, preparation, prepared);
   if (unconditional)
     mx::eval({conditional, *unconditional});
   else
     mx::eval(conditional);
   mx::synchronize();
   double prefill_seconds = monotonic_seconds() - started;
+  preparation.update(prompt_tokens);
+  preparation.finish();
+  Progress generation(
+      progress, phase == "abc" ? "Planning score" : "Generating song",
+      phase == "abc" ? "tokens" : "codec_frames", 0, sampling.max_tokens);
   TokenGeneration result;
   std::optional<double> first;
   bool eos = false;
@@ -245,6 +258,7 @@ TokenGeneration generate_tokens(ARModel &model, const std::vector<int> &prefix,
       break;
     }
     result.tokens.push_back(token);
+    generation.advance();
     if (step + 1 < sampling.max_tokens) {
       auto input = mx::array(&token, {1, 1}, mx::int32);
       conditional = model.project(
@@ -269,6 +283,7 @@ TokenGeneration generate_tokens(ARModel &model, const std::vector<int> &prefix,
                    {"attention", "sdpa"},
                    {"backend", "mlx"}};
   result.truncated = !eos;
+  generation.finish(result.truncated);
   return result;
 }
 } // namespace lyra

@@ -13,7 +13,9 @@ struct ABCScoreView: View {
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 8) {
-        Text(session == nil ? "Score" : "Write").font(.headline)
+        if session == nil {
+          Text("Score").font(.headline)
+        }
         if let session {
           Button {
             session.document.undo()

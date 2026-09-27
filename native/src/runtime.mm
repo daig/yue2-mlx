@@ -687,24 +687,35 @@ void GPUExecution::close() {
 
 struct Progress::Impl {
   bool enabled, finished = false;
-  int complete = 0, total, exceptions = std::uncaught_exceptions();
+  int complete = 0, total, limit, exceptions = std::uncaught_exceptions();
   std::string label, unit;
   double start = monotonic_seconds();
-  Impl(bool e, std::string l, std::string u, int t)
-      : enabled(e), total(t), label(std::move(l)), unit(std::move(u)) {}
+  Impl(bool e, std::string l, std::string u, int t, int maximum)
+      : enabled(e), total(t), limit(maximum), label(std::move(l)),
+        unit(std::move(u)) {}
   void publish(const char *type, bool truncated = false,
                const char *status = "running") {
-    if (enabled && execution_state && execution_state->context.progress &&
-        execution_state->context.event && !execution_state->callback_failed)
-      emit_event(
-          {{"type", type},
-           {"stage", label},
-           {"unit", unit},
-           {"completed", complete},
-           {"total", total > 0 ? Json(total) : Json(nullptr)},
-           {"elapsed_seconds", std::max(0., monotonic_seconds() - start)},
-           {"truncated", truncated},
-           {"status", status}});
+    if (!enabled || !execution_state || !execution_state->context.progress ||
+        !execution_state->context.event || execution_state->callback_failed)
+      return;
+    Json event = {
+        {"type", type},
+        {"stage", label},
+        {"unit", unit},
+        {"completed", complete},
+        {"total", total > 0 ? Json(total) : Json(nullptr)},
+        {"limit", limit > 0 ? Json(limit) : Json(nullptr)},
+        {"elapsed_seconds", std::max(0., monotonic_seconds() - start)},
+        {"truncated", truncated},
+        {"status", status}};
+    if (unit == "codec_frames") {
+      const auto seconds = [](int frames) {
+        return std::max(0., (1920. * frames - 64.) / 48000.);
+      };
+      event["content_seconds"] = seconds(complete);
+      event["limit_seconds"] = limit > 0 ? Json(seconds(limit)) : Json(nullptr);
+    }
+    emit_event(event);
   }
   void finish(bool truncated, const char *status) {
     if (finished)
@@ -713,11 +724,12 @@ struct Progress::Impl {
     publish("stage_completed", truncated, status);
   }
 };
-Progress::Progress(bool enabled, std::string label, std::string unit, int total)
+Progress::Progress(bool enabled, std::string label, std::string unit, int total,
+                   int limit)
     : impl_(std::make_unique<Impl>(enabled, std::move(label), std::move(unit),
-                                   total)) {
-  if (total < 0)
-    throw Error("ValueError", "total must be nonnegative");
+                                   total, limit)) {
+  if (total < 0 || limit < 0)
+    throw Error("ValueError", "Progress totals and limits must be nonnegative");
   impl_->publish("stage_started");
 }
 Progress::~Progress() {

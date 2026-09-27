@@ -199,17 +199,13 @@ TokenGeneration Pipeline::generate_phase(const std::vector<int> &prefix,
                 "Negative prefix + generation budget exceeds context");
   check_cancelled();
   auto &model = load_ar();
-  Progress progress(options_.progress,
-                    phase == "abc" ? "Planning score" : "Generating song",
-                    "tokens");
   auto guarded = [this] {
     execution_->check();
     return cancellation_requested();
   };
-  auto result = generate_tokens(
-      model, prefix, sampling, seed, phase, negative, guidance, legacy_off,
-      guarded, [&](std::string_view, int) { progress.advance(); });
-  progress.finish(result.truncated);
+  auto result =
+      generate_tokens(model, prefix, sampling, seed, phase, negative, guidance,
+                      legacy_off, guarded, {}, options_.progress);
   execution_->check();
   return result;
 }
@@ -278,7 +274,6 @@ FloatMatrix Pipeline::synthesize(const SemanticResult &semantic,
                 "Semantic result must contain at least one codec frame");
   check_cancelled();
   auto &model = load_nar();
-  Progress progress(options_.progress, "Synthesizing audio", "steps");
   auto result = lyra::synthesize(
       model, semantic.plan.prefix, semantic.tokens, noise,
       options_.generation.ode_steps, options_.generation.context,
@@ -287,10 +282,7 @@ FloatMatrix Pipeline::synthesize(const SemanticResult &semantic,
         execution_->check();
         return cancellation_requested();
       },
-      [&](int complete, int total) {
-        execution_->check();
-        progress.update(complete, total);
-      });
+      [&](int, int) { execution_->check(); }, options_.progress);
   execution_->check();
   return result;
 }

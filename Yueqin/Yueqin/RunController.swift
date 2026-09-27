@@ -182,6 +182,11 @@ enum PlannedScoreStatus: Equatable, Sendable {
       } catch {
         failure = error.localizedDescription
       }
+      DispatchQueue.main.async { [self] in
+        guard activeID == id, isRunning else { return }
+        progress = .null
+        if !cancellationRequested { statusTitle = "Checking output…" }
+      }
       let parsed =
         outcome.flatMap { try? JSONDecoder().decode(RunJSON.self, from: $0.json) } ?? .null
       let output = parsed["output"].text.map { URL(fileURLWithPath: $0) } ?? submission.outputURL

@@ -4,7 +4,7 @@ Run shell commands from the repository root after completing the [native install
 
 ## Yueqin macOS app
 
-Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as described in the [app setup](../README.md#yueqin-macos-app). The sidebar presents every native workflow. **Activity & Results** stays available while navigating: below the request controls in **Plan score**, and in the right-hand inspector elsewhere. Run the selected workflow with the labeled toolbar button or **Command-Return**. Execution is serial and off the UI thread. Cancel from the toolbar, activity panel or **Command-Period**; quitting during execution offers to cancel and waits for the native worker to stop.
+Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as described in the [app setup](../README.md#yueqin-macos-app). The sidebar separates **Create** (**Generate song**, **Scores**), **Tools** and **Setup**. Scores has persistent **Generate** and **Edit** navigation; its generation view keeps settings beside the candidate or progress, with activity under **Run details**. Other workflows show **Activity & Results** on the right. The labeled toolbar action and **Command-Return** follow the visible task: generate a score, cancel its generation, accept a candidate, open song setup or generate a song. Execution is serial and off the UI thread. Cancel from the toolbar, activity panel or **Command-Period**; quitting during execution offers to cancel and waits for the native worker to stop.
 
 ### Models and output
 
@@ -16,37 +16,45 @@ Build and launch [`Yueqin/Yueqin.xcodeproj`](../Yueqin/Yueqin.xcodeproj) as desc
 
 ### Requests and raw controls
 
-**Generate song** and **Plan score** can compose a request or submit a JSON file. Composed requests expose style, lyrics text/file, generated or supplied ABC, `cot` (`full`, `melody`, `off`), identifier, exact signed 64-bit seed and CFG scale. Advanced controls retain separate ABC/semantic temperature, top-p, top-k, repetition penalty/window and minimum/maximum tokens. Solver steps and the complete `generation_config` JSON object are available directly; a populated solver-steps field overrides `ode_steps` in that object. Composed requests can be exported as JSON.
+**Generate song** and **Scores → Generate** use one **Shared song brief**: request source, style and lyrics are shared, while sampling, identifier, seed and output settings remain per-workflow. Both accept composed inputs or a JSON file. Composed requests expose style, lyrics text/file, identifier, exact signed 64-bit seed and CFG scale. Direct song generation retains automatic or supplied ABC and `cot` (`full`, `melody`, `off`). Score generation always requests new notation; an attached editor score always supplies that notation. These two paths offer full or melody conditioning, not off. Advanced controls retain separate ABC/semantic temperature, top-p, top-k, repetition penalty/window and minimum/maximum tokens. Solver steps and the complete `generation_config` JSON object are available directly; a populated solver-steps field overrides `ode_steps` in that object. Composed request export includes the current attached ABC when present.
 
-JSON-file mode passes the file path to the core without importing or rewriting it. Relative `lyrics_path` and `abc_path` still resolve beside that file. Only explicitly enabled file overrides are submitted; edit nested sampling and generation configuration in the original JSON. Switching between file and composed mode retains the composed draft.
+JSON-file mode passes the file path to the core without importing or rewriting it. Relative `lyrics_path` and any supplied `abc_path` resolve beside that file. Only explicitly enabled file overrides are submitted, except for the score source and conditioning required by the visible task: **Scores → Generate** clears the file's existing ABC/ABC path and requests fresh notation; an editor attachment supplies the working ABC instead. Shared style and lyrics overrides apply in both workflows. Edit nested sampling and generation configuration in the original JSON. Switching between file and composed mode retains the composed draft.
 
-**Render plan** consumes a saved-plan directory. **Replay artifacts** consumes a saved-song directory and exposes `decode` and `synthesize`. The result inspector can hand a saved plan to rendering or a recording to replay, preserving the input and clearing the new output destination. **Batch** accepts JSONL, optional score-mode override and matching-output resume; failed rows remain visible alongside successful recordings.
+**Tools → Render saved plan** consumes an intact saved-plan directory. It is for rendering the original frozen plan, not incorporating editor changes. **Replay artifacts** consumes a saved-song directory and exposes `decode` and `synthesize`. The result inspector offers recording replay; saved-plan rendering is under **Advanced output**. These handoffs preserve the input and clear the new output destination. **Batch** accepts JSONL, optional score-mode override and matching-output resume; failed rows remain visible alongside successful recordings.
 
 ### Results
 
 The inspector shows native stages/counts, elapsed time, warnings, typed errors, truncation flags and batch-row outcomes. A token-limited run can complete without reaching the sequence's natural end. Files at a failed run's destination are not presented as proof of newly completed output.
 
-Play/pause and seek use native audio playback. **Export FLAC…** copies the original recording without re-encoding, staging beside the destination before an atomic replacement. **Advanced output** is collapsed by default and resets when another run starts. It contains generated-file Finder links, output/model paths, exact submitted options, result JSON and any partial batch receipt. Playback, workflow actions, errors and truncation warnings remain outside it. Neither frontend adds memory caps or allocation guards.
+Progress is stage-local, not an overall percentage or ETA:
+
+- **Preparing prompt** counts processed prompt tokens, including the negative prompt when CFG is active. **Preparing acoustic conditioning** counts prepared model layers before the solver starts.
+- **Planning score** shows tokens produced and a separate token limit. The limit is a ceiling, not a completion target.
+- **Generating song** shows seconds of audio represented by generated semantic frames, with a separate duration limit. This is **not yet playable audio** and is not a requested song duration.
+- **Synthesizing audio** and **Decoding audio** show exact completed/total solver steps and decoder chunks. Their percentages apply only to the current stage.
+- **Saving score**, **Saving recording** and **Checking output…** remain part of the run. Completion is reported only after native execution and output collection finish.
+
+**Play song**, pause and seek use native audio playback. **Export FLAC…** copies the original recording without re-encoding, staging beside the destination before an atomic replacement. **Advanced output** is collapsed by default and resets when another run starts. It contains **Render saved plan**, generated-file Finder links, output/model paths, exact submitted options, result JSON and any partial batch receipt. Playback, recording replay, errors and truncation warnings remain outside it. Neither frontend adds memory caps or allocation guards.
 
 GUI verification is bounded functional smoke with real checkpoints: all seven workflows, both replay stages, a short recording, resume, partial batches, cancellation/recovery, readiness/error presentation and playback were exercised in a temporary native SwiftUI host. Native numerical fidelity, listening quality and performance acceptance remain deferred. System-hosted save-dialog acceptance was not completed by session automation; request serialization and FLAC creation/replacement/failure preservation were exercised separately.
 
 ### Score workspace
 
-**Plan score** gives notation the main workspace. The **Generation** toolbar control shows or hides the narrower request/activity column. Opening or creating a score hides that column so editing gets the available width.
+**Scores** separates **Generate** from **Edit**, with both tabs always visible. Generate puts request settings on the left and a separate candidate preview on the right. Edit gives the notation editor the available width. Switching tabs preserves the working document and its undo history; it is navigation, not replacement.
 
-Use **File → New Score** (Command-N), **Open ABC Score…** (Command-O), or generate a score with **Plan score**. Imports require lossless UTF-8 and are not silently normalized. **Save** (Command-S) initially chooses an edited copy; **Save As…** chooses another destination. Dirty documents prompt before replacement, closing or quitting. Later saves detect external file changes instead of overwriting them silently. Saving inside an integrity-protected plan folder is refused.
+Use **New blank score**, **Open ABC…**, or the corresponding **File → New Score** (Command-N) and **Open ABC Score…** (Command-O) commands to start editing. These actions do not reset the shared song brief. Imports require lossless UTF-8 and are not silently normalized. **Save** (Command-S) initially chooses an edited copy; **Save Score As…** in the document's More menu chooses another destination. Dirty documents prompt before replacement, closing or quitting. Later saves detect external file changes instead of overwriting them silently. Saving inside an integrity-protected plan folder is refused.
 
-After successful planning, the editor opens the actual saved `score.abc`. If the current document was edited or replaced while planning, **Open new plan** lets you choose when to replace it. Cancellation, errors and score-off plans leave the current document intact. Token-limited notation is marked as potentially incomplete. Editing never rewrites a saved plan's ABC or token artifacts.
+**Generate score** creates new music from the brief, not a revision of the editor's notes. Progress replaces the candidate preview while running; the working document remains available in Edit. Completion never changes the document or takes you away from the view you chose. Review the result, then explicitly choose **Edit this score** or **Replace current score…** to adopt it. Cancelling the unsaved-change prompt retains both the working document and candidate. **Keep current** returns to the editor without adopting; **Generate another** requests another candidate. Once adopted, **Return to editor** returns to your edits instead of reopening the original result. Cancellation and errors leave the document intact. Token-limited notation is marked as potentially incomplete. Editing never rewrites a saved plan's ABC or token artifacts.
 
-The editor follows the conservative [upstream ABC authoring dialect](../vendor/yue/skills/yue2-music/references/abc-editing.md): two monophonic **Vocal** and **Ins** parts, notes/rests, supported durations and ties, Vocal chord symbols, meter, key, tempo and section markers. This is an authoring boundary, not an engine-enforced whitelist or a promise of model adherence. General ABC may still engrave, but unsupported features remain flagged. **ABC repair** exposes the original source; **Adapt simple ABC to two parts** is an explicit, undoable conversion and refuses ambiguous or unsupported music.
+The editor follows the conservative [upstream ABC authoring dialect](../vendor/yue/skills/yue2-music/references/abc-editing.md): two monophonic **Vocal** and **Ins** parts, notes/rests, supported durations and ties, Vocal chord symbols, meter, key, tempo and section markers. This is an authoring boundary, not an engine-enforced whitelist or a promise of model adherence. General ABC may still engrave, but unsupported features remain flagged by the compact **Review issues** control. The document's More menu and native **Score** menu expose **ABC Source**, **Review Compatibility** and **Keyboard Reference** without keeping those panels open. **Adapt simple ABC to two parts** is an explicit, undoable conversion and refuses ambiguous or unsupported music.
 
 - Click a note/rest to select it; Shift-click extends within one part. Left/Right moves selection, Shift extends, Up/Down changes staff pitch, and +/− changes semitone. Dragging changes staff pitch.
 - **Note entry** (Enter or Shift-N) overwrites the selected time and advances. A–G enters pitch, R enters a rest, 3–8 chooses thirty-second through whole notes, period toggles a dot, and T toggles a tie. Entry past the last bar extends both parts. Escape returns to selection mode.
-- Use the lower **Harmony, setup and bars** panel for chord quality/slash bass, key/meter/tempo/unit, aligned bar insertion/deletion/duplication and sections. Key changes preserve sounding pitches.
+- Use the lower **Notation properties · harmony, setup and bars** panel for chord quality/slash bass, key/meter/tempo/unit, aligned bar insertion/deletion/duplication and sections. Key changes preserve sounding pitches.
 - Command-Z / Shift-Command-Z undo/redo. Command-C / X / V copy/cut/paste musical selections. The source field supports text editing with the same document undo history.
-- **Play** or Space previews local synthesized tones for both monophonic parts. It is not generated audio and does not synthesize the chord symbols.
+- **Preview notation** or Space previews local synthesized tones for both monophonic parts. It is distinct from **Play song**: no generated audio or chord-symbol synthesis.
 
-**Use in song** copies the current compatible ABC into a fresh **Generate song** request with full score conditioning. Review the request before running it. JSON-file requests retain their other fields and relative paths, with explicit ABC and mode overrides. **Render saved plan**, under **Advanced output**, instead renders the intact original plan; it does not include editor changes.
+**Create song…** attaches the current compatible working score to **Generate song** without copying an old planning request over the shared brief or song settings. The attachment card exposes **Edit…** and **Remove**. Review the brief and settings, then **Generate song** captures the exact current ABC for that run. Subsequent edits affect the next run, not an existing recording; the card indicates when the recording uses an earlier score. JSON-file requests retain their other fields and relative paths, with explicit ABC and mode overrides. Removing the attachment restores the direct song-generation score controls. **Render saved plan**, under **Tools** or **Advanced output**, instead renders the intact original plan; it does not include editor changes.
 
 ### Standalone ABC score component
 
@@ -234,6 +242,8 @@ Generation, planning, rendering, replay and batch also accept `model`, `vae`, `c
 
 Optional `Engine(onEvent:)` receives owned JSON `Data` synchronously on the executing thread. Events include workflow start, stage start/progress/completion, generation completion, batch rows, failures and warnings. Dispatch UI updates to the UI actor; do not re-enter `execute` from a callback. Omitting the callback avoids native progress serialization. See [cancellation and ownership](#cancellation-and-ownership) for lifecycle rules.
 
+Progress events use `completed` for completed work and nullable `total` for an exact known stage total. A separate nullable `limit` is a generation ceiling; never divide by it to infer completion. For `unit: "codec_frames"`, `completed` excludes EOS and `content_seconds` is `max(0, (1920 × completed − 64) / 48000)`. `limit_seconds` applies the same conversion to the limit, or is null when absent. These durations describe represented content, not decoded or streamable audio. Preparation uses `prompt_tokens` and `conditioning_layers`; synthesis and decoding use `steps` and `chunks`. The `generation_completed` event precedes artifact saving and is not workflow success: wait for `execute` to return before final output handling.
+
 The lower-level [C API](../native/include/CLyraCore/lyra.h) is also available. C++/C hosts must explicitly supply the `mlx.metallib` path through `configure_runtime`/context creation; the core never guesses from the host executable. Swift supplies its bundle resource automatically. C callbacks borrow their event string only for the callback; result/error strings belong to the caller and must be released with `lyra_string_free`.
 
 ## Native API and independent stages
@@ -265,7 +275,7 @@ lyra plan request.json \
   --output outputs/plan
 ```
 
-The CLI and **Plan score** GUI workflow normally produce the same five-file plan. An intentional `cot = off` plan omits `score.abc`:
+The CLI and **Scores → Generate** GUI workflow produce the same five-file plan. The GUI always requests notation; an intentional CLI `cot = off` plan omits `score.abc`:
 
 | File | Meaning |
 | --- | --- |
@@ -273,7 +283,7 @@ The CLI and **Plan score** GUI workflow normally produce the same five-file plan
 | `abc_tokens.npy` | The exact integer token IDs representing the planned score, stored as a NumPy-format array. Rendering reuses these IDs rather than re-tokenizing the text. |
 | `prefix.npy` | The complete saved conditioning-token prefix for subsequent generation, also a NumPy-format array. It is not another score or an audio waveform. |
 | `plan.json` | Structured plan data: request, ABC text and IDs, timing, truncation flags and effective generation configuration. |
-| `plan_manifest.json` | SHA-256 integrity records for the other four files. Keep all five together for **Render plan** / `render-plan`. |
+| `plan_manifest.json` | SHA-256 integrity records for the other four files. Keep all five together for **Render saved plan** / `render-plan`. |
 
 Planning alone does not create audio, semantic tokens or acoustic latents. When resource recording is enabled, sibling files such as `outputs/plan.resources.json` and `outputs/plan.resources.jsonl` contain the diagnostic resource summary and individual samples. They are not score content or required plan inputs.
 

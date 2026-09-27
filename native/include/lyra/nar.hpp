@@ -16,6 +16,7 @@ FloatMatrix synthesize(AcousticModel &, const std::vector<int> &prefix,
                        int steps = 32, int context = CONTEXT,
                        int query_chunk_size = 256,
                        const Cancelled &cancelled = {},
-                       const StepCallback &on_progress = {});
+                       const StepCallback &on_progress = {},
+                       bool progress = false);
 bool mpp_attention_available();
 } // namespace lyra

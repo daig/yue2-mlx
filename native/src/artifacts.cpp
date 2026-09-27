@@ -1,4 +1,5 @@
 #include "lyra/artifacts.hpp"
+#include "lyra/runtime.hpp"
 #include "lyra/storage.hpp"
 #include "lyra/vae.hpp"
 #include <algorithm>
@@ -373,6 +374,7 @@ SymbolicPlan load_plan(const fs::path &directory) {
 }
 void save_plan_artifacts(const SymbolicPlan &plan, const fs::path &directory,
                          const GenerationConfig &config) {
+  Progress progress(true, "Saving score");
   save_plan(plan, directory);
   auto data = read_json(directory / "plan.json");
   data["generation_config"] = config.to_json();
@@ -401,6 +403,7 @@ load_plan_artifacts(const fs::path &directory) {
   }
 }
 Json save_artifacts(const SongResult &song, const fs::path &directory) {
+  Progress progress(true, "Saving recording");
   if (fs::exists(directory) && !fs::is_empty(directory))
     throw Error("FileExistsError",
                 "Use an empty artifact directory to avoid mixing recordings");

@@ -2,6 +2,7 @@
 #include "lyra/conversion.hpp"
 #include "lyra/nar_attention.hpp"
 #include "lyra/protocol.hpp"
+#include "lyra/runtime.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -131,7 +132,8 @@ class CachedNAR {
 public:
   CachedNAR(AcousticModel &model, const std::vector<int> &tokens,
             const float *noise, int frames, int block,
-            const Cancelled &cancelled, int visible_end = 0)
+            const Cancelled &cancelled, Progress &preparation,
+            int visible_end = 0)
       : model_(model), cancelled_(cancelled), length_(frames + 2),
         block_(block), factors_{mx::array(0), mx::array(0)}, position_(0),
         initial_(bf16(mx::array(noise, {frames, 64}, mx::float32))),
@@ -189,6 +191,7 @@ public:
                              model.ar.weights, base + "mlp");
       mx::eval({cached_key, cached_value, x});
       cache_.emplace_back(std::move(cached_key), std::move(cached_value));
+      preparation.advance();
     }
     mx::eval({ar_factors.first, ar_factors.second});
   }
@@ -402,7 +405,7 @@ FloatMatrix synthesize(AcousticModel &model, const std::vector<int> &prefix,
                        const std::vector<int> &codec, const FloatMatrix &noise,
                        int steps, int context, int query_chunk_size,
                        const Cancelled &cancelled,
-                       const StepCallback &on_progress) {
+                       const StepCallback &on_progress, bool progress) {
   if (steps < 1)
     throw Error("ValueError", "steps must be a positive integer");
   if (query_chunk_size < 1)
@@ -432,6 +435,7 @@ FloatMatrix synthesize(AcousticModel &model, const std::vector<int> &prefix,
                 "Acoustic progress step count exceeds supported range");
   const int total_steps = steps * static_cast<int>(ranges.size());
   FloatMatrix output{noise.rows, 64, std::vector<float>(noise.values.size())};
+  std::optional<Progress> solver;
   for (size_t index = 0; index < ranges.size(); ++index) {
     check_cancelled(cancelled, "Cancelled before acoustic prefill");
     const auto [start, end] = ranges[index];
@@ -441,17 +445,32 @@ FloatMatrix synthesize(AcousticModel &model, const std::vector<int> &prefix,
     for (int i = start; i < end; ++i)
       tokens.push_back(codec[i] + CODEC_OFFSET);
     tokens.push_back(MUSIC_END);
+    std::string label = "Preparing acoustic conditioning";
+    if (ranges.size() > 1)
+      label += " (chunk " + std::to_string(index + 1) + "/" +
+               std::to_string(ranges.size()) + ")";
+    Progress preparation(progress, std::move(label), "conditioning_layers",
+                         model.config.at("num_hidden_layers").get<int>());
     CachedNAR engine(model, tokens,
                      noise.values.data() + static_cast<size_t>(start) * 64,
-                     end - start, query_chunk_size, cancelled);
-    StepCallback progress;
-    if (on_progress)
-      progress = [&, index](int completed, int) {
-        on_progress(static_cast<int>(index) * steps + completed, total_steps);
+                     end - start, query_chunk_size, cancelled, preparation);
+    preparation.finish();
+    if (!solver)
+      solver.emplace(progress, "Synthesizing audio", "steps", total_steps);
+    solver->update(static_cast<int>(index) * steps);
+    StepCallback step_progress;
+    if (on_progress || progress)
+      step_progress = [&, index](int completed, int) {
+        const int overall = static_cast<int>(index) * steps + completed;
+        if (on_progress)
+          on_progress(overall, total_steps);
+        solver->update(overall);
       };
     engine.solve(output.values.data() + static_cast<size_t>(start) * 64, steps,
-                 progress);
+                 step_progress);
   }
+  if (solver)
+    solver->finish();
   return output;
 }
 } // namespace lyra
