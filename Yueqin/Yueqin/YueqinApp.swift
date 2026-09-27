@@ -36,7 +36,7 @@ final class YueqinWorkspace {
   private(set) var candidate: ScoreCandidate?
   private(set) var hasUnreadScore = false
   private(set) var scoreGenerationError: String?
-  private(set) var usesEditorScore = false
+  private var attachedScoreID: String?
   private(set) var isPreparingRun = false
   private(set) var isAdoptingCandidate = false
   private var openedCandidateID: UUID?
@@ -63,6 +63,11 @@ final class YueqinWorkspace {
   }
 
   var kind: WorkflowKind { selection ?? .generate }
+  /// The song uses the score document that was attached, never whichever
+  /// score later replaces it in the editor.
+  var usesEditorScore: Bool {
+    attachedScoreID != nil && attachedScoreID == scoreDocument.id
+  }
   var draft: WorkflowDraft { draft(for: kind) }
   var isGeneratingScore: Bool { runner.isRunning && runner.lastSubmission?.kind == .plan }
   var isShowingScoreGeneration: Bool { kind == .plan && scoreView == .generate }
@@ -264,7 +269,7 @@ final class YueqinWorkspace {
           "Review the score's compatibility issues before creating a song."
         return
       }
-      usesEditorScore = true
+      attachedScoreID = scoreDocument.id
       if generate.request.cot == "off" { generate.request.cot = "full" }
       scoreSession.command("stop")
       selection = .generate
@@ -275,7 +280,7 @@ final class YueqinWorkspace {
   }
 
   func removeScoreAttachment() {
-    usesEditorScore = false
+    attachedScoreID = nil
     inputError = nil
   }
 
@@ -311,7 +316,7 @@ final class YueqinWorkspace {
     request.overrideABC = false
     generate.request = request
     generate.save()
-    usesEditorScore = false
+    attachedScoreID = nil
     selection = .generate
     inputError = nil
   }
